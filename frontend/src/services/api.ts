@@ -75,7 +75,7 @@ export const sectorsApi = {
 export const flowsApi = {
   getAll: () => api.get<FlowTemplate[]>('/flows').then((r) => r.data),
   getById: (id: string) => api.get<FlowTemplate>(`/flows/${id}`).then((r) => r.data),
-  create: (data: { name: string; description?: string; type: string; isActive?: boolean }) =>
+  create: (data: { name: string; description?: string; type: string; scope?: string; sectorId?: string; isActive?: boolean }) =>
     api.post<FlowTemplate>('/flows', data).then((r) => r.data),
   update: (id: string, data: Partial<FlowTemplate>) =>
     api.put<FlowTemplate>(`/flows/${id}`, data).then((r) => r.data),
@@ -126,6 +126,8 @@ export const tasksApi = {
     api.post<RequestTask>(`/tasks/${id}/complete`, { notes }).then((r) => r.data),
   reject: (id: string, notes?: string) =>
     api.post<RequestTask>(`/tasks/${id}/reject`, { notes }).then((r) => r.data),
+  batchComplete: (taskIds: string[], notes?: string) =>
+    api.post<{ completed: number; tasks: RequestTask[] }>('/tasks/batch-complete', { taskIds, notes }).then((r) => r.data),
   uploadAttachment: (id: string, files: File[]) => {
     const formData = new FormData();
     files.forEach((f) => formData.append('files', f));

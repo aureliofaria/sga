@@ -59,6 +59,7 @@ export default function FlowEditor() {
       requiredRole: 'USER',
       requiresAttachment: false,
       deadlineHours: '',
+      slaExpiry: 'KEEP_WITH_RESPONSIBLE',
       handlingSectorId: '',
       order: steps.length,
       authLevels: [],
@@ -121,6 +122,7 @@ export default function FlowEditor() {
           requiredRole: step.requiredRole,
           requiresAttachment: step.requiresAttachment,
           deadlineHours: step.deadlineHours ? parseInt(step.deadlineHours) : null,
+          slaExpiry: step.slaExpiry || 'KEEP_WITH_RESPONSIBLE',
           handlingSectorId: step.handlingSectorId || null,
           order: i,
         };
@@ -254,8 +256,16 @@ export default function FlowEditor() {
                 <input type="text" value={step.description || ''} onChange={(e) => updateStep(idx, 'description', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Prazo (horas)</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Prazo SLA (horas)</label>
                 <input type="number" value={step.deadlineHours || ''} onChange={(e) => updateStep(idx, 'deadlineHours', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Ex: 48" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Ação no vencimento SLA</label>
+                <select value={step.slaExpiry || 'KEEP_WITH_RESPONSIBLE'} onChange={(e) => updateStep(idx, 'slaExpiry', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500">
+                  <option value="KEEP_WITH_RESPONSIBLE">Manter com responsável</option>
+                  <option value="RETURN_TO_REQUESTER">Devolver ao solicitante</option>
+                  <option value="TRANSFER_TO_LEADER">Transferir ao líder do setor</option>
+                </select>
               </div>
               {scope === 'INTER' && (
                 <div>

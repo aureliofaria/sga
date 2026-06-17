@@ -83,13 +83,14 @@ router.delete('/:id', authenticate, requireRole('ADMIN'), async (req: AuthReques
 // Steps
 router.post('/:id/steps', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, requiredRole, requiresAttachment, deadlineHours, order, handlingSectorId } = req.body;
+    const { name, description, requiredRole, requiresAttachment, deadlineHours, slaExpiry, order, handlingSectorId } = req.body;
     const maxOrder = await prisma.flowStep.aggregate({ where: { flowTemplateId: req.params.id }, _max: { order: true } });
     const nextOrder = order ?? ((maxOrder._max.order ?? -1) + 1);
     const step = await prisma.flowStep.create({
       data: {
         flowTemplateId: req.params.id, name, description, requiredRole,
         requiresAttachment: requiresAttachment ?? false, deadlineHours,
+        slaExpiry: slaExpiry || 'KEEP_WITH_RESPONSIBLE',
         order: nextOrder, handlingSectorId: handlingSectorId || null,
       },
       include: { handlingSector: { select: { id: true, name: true } } },
@@ -102,10 +103,14 @@ router.post('/:id/steps', authenticate, requireRole('ADMIN'), async (req: AuthRe
 
 router.put('/:id/steps/:stepId', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, requiredRole, requiresAttachment, deadlineHours, order, handlingSectorId } = req.body;
+    const { name, description, requiredRole, requiresAttachment, deadlineHours, slaExpiry, order, handlingSectorId } = req.body;
     const step = await prisma.flowStep.update({
       where: { id: req.params.stepId },
-      data: { name, description, requiredRole, requiresAttachment, deadlineHours, order, handlingSectorId: handlingSectorId || null },
+      data: {
+        name, description, requiredRole, requiresAttachment, deadlineHours,
+        slaExpiry: slaExpiry || 'KEEP_WITH_RESPONSIBLE',
+        order, handlingSectorId: handlingSectorId || null,
+      },
       include: { handlingSector: { select: { id: true, name: true } } },
     });
     res.json(step);

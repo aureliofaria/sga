@@ -120,6 +120,85 @@ export async function checkAuthorizationLevel(requestId: string) {
   return currentStep.authLevels[currentStep.authLevels.length - 1];
 }
 
+export async function processSlaExpiries(): Promise<number> {
+  const now = new Date();
+  const expiredTasks = await prisma.requestTask.findMany({
+    where: {
+      status: { in: ['PENDING', 'IN_PROGRESS'] },
+      dueDate: { lt: now },
+      slaEscalated: false,
+    },
+    include: {
+      step: {
+        include: {
+          handlingSector: {
+            include: {
+              members: {
+                where: { role: 'LIDER' },
+                include: { user: { select: { id: true, name: true } } },
+              },
+            },
+          },
+        },
+      },
+      request: { include: { initiator: { select: { id: true, name: true } } } },
+      assignee: { select: { id: true, name: true } },
+    },
+  });
+
+  for (const task of expiredTasks) {
+    const expiry = task.step.slaExpiry;
+
+    if (expiry === 'RETURN_TO_REQUESTER') {
+      await prisma.requestTask.update({
+        where: { id: task.id },
+        data: { status: 'REJECTED', slaEscalated: true, notes: (task.notes ? task.notes + ' | ' : '') + 'SLA expirado — devolvido ao solicitante' },
+      });
+      await prisma.request.update({ where: { id: task.requestId }, data: { status: 'RETURNED' } });
+      await prisma.auditLog.create({
+        data: {
+          requestId: task.requestId,
+          userId: 'system',
+          userName: 'Sistema',
+          action: 'SLA_RETURNED',
+          details: `SLA expirado. Tarefa "${task.title}" devolvida ao solicitante ${task.request.initiator.name}`,
+        },
+      });
+    } else if (expiry === 'TRANSFER_TO_LEADER') {
+      const leader = task.step.handlingSector?.members[0];
+      await prisma.requestTask.update({
+        where: { id: task.id },
+        data: { assigneeId: leader ? leader.userId : task.assigneeId, slaEscalated: true },
+      });
+      await prisma.auditLog.create({
+        data: {
+          requestId: task.requestId,
+          userId: 'system',
+          userName: 'Sistema',
+          action: 'SLA_ESCALATED',
+          details: leader
+            ? `SLA expirado. Tarefa "${task.title}" transferida ao líder ${leader.user.name}`
+            : `SLA expirado. Tarefa "${task.title}" mantida (sem líder no setor)`,
+        },
+      });
+    } else {
+      // KEEP_WITH_RESPONSIBLE — just flag it
+      await prisma.requestTask.update({ where: { id: task.id }, data: { slaEscalated: true } });
+      await prisma.auditLog.create({
+        data: {
+          requestId: task.requestId,
+          userId: 'system',
+          userName: 'Sistema',
+          action: 'SLA_EXPIRED',
+          details: `SLA expirado. Tarefa "${task.title}" mantida com responsável ${task.assignee.name}`,
+        },
+      });
+    }
+  }
+
+  return expiredTasks.length;
+}
+
 export async function isStepComplete(requestId: string, stepOrder: number): Promise<boolean> {
   const request = await prisma.request.findUnique({
     where: { id: requestId },

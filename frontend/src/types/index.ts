@@ -59,6 +59,7 @@ export interface FlowStep {
   requiredRole?: string;
   requiresAttachment: boolean;
   deadlineHours?: number;
+  slaExpiry?: 'KEEP_WITH_RESPONSIBLE' | 'RETURN_TO_REQUESTER' | 'TRANSFER_TO_LEADER';
   handlingSectorId?: string;
   handlingSector?: { id: string; name: string };
   authLevels: AuthorizationLevel[];
@@ -127,6 +128,7 @@ export interface RequestTask {
   dueDate?: string;
   completedAt?: string;
   notes?: string;
+  slaEscalated?: boolean;
   attachments?: Attachment[];
   createdAt: string;
   updatedAt: string;
@@ -145,6 +147,7 @@ export type RequestStatus =
   | 'AWAITING_APPROVAL'
   | 'APPROVED'
   | 'REJECTED'
+  | 'RETURNED'
   | 'COMPLETED'
   | 'CANCELLED';
 
