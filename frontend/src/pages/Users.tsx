@@ -8,6 +8,13 @@ import type { User } from '../types';
 
 const roles = ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'];
 
+const requestTypes = [
+  { type: 'ONBOARDING', label: 'Admissão', icon: '👤' },
+  { type: 'OFFBOARDING', label: 'Desligamento', icon: '🚪' },
+  { type: 'PAYMENT', label: 'Pagamento', icon: '💳' },
+  { type: 'PURCHASE', label: 'Compra', icon: '🛒' },
+];
+
 function UserModal({ user, onClose }: { user?: User; onClose: () => void }) {
   const isEdit = !!user;
   const qc = useQueryClient();
@@ -23,10 +30,22 @@ function UserModal({ user, onClose }: { user?: User; onClose: () => void }) {
     isActive: user?.isActive ?? true,
   });
 
+  // null (ou undefined) = todos os tipos liberados; array = restrito ao conjunto
+  const [allowAll, setAllowAll] = useState<boolean>(user?.requestPermissions == null);
+  const [permissions, setPermissions] = useState<string[]>(
+    user?.requestPermissions && user.requestPermissions.length > 0 ? user.requestPermissions : []
+  );
+
+  const togglePermission = (type: string) => {
+    setPermissions((prev) => prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]);
+  };
+
   const mutation = useMutation({
     mutationFn: () => {
-      if (isEdit) return usersApi.update(user!.id, { ...form as any, password: form.password || undefined });
-      return usersApi.create({ ...form as any, password: form.password });
+      const requestPermissions = allowAll ? null : permissions;
+      const payload: any = { ...form, requestPermissions };
+      if (isEdit) return usersApi.update(user!.id, { ...payload, password: form.password || undefined });
+      return usersApi.create({ ...payload, password: form.password });
     },
     onSuccess: () => {
       toast.success(isEdit ? 'Usuário atualizado!' : 'Usuário criado!');
@@ -65,6 +84,32 @@ function UserModal({ user, onClose }: { user?: User; onClose: () => void }) {
               <option value="">Sem departamento</option>
               {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
+          </div>
+          <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Tipos de solicitação que pode abrir</label>
+            {form.role === 'ADMIN' ? (
+              <p className="text-xs text-gray-500">Administradores podem abrir todos os tipos de solicitação.</p>
+            ) : (
+              <>
+                <label className="flex items-center gap-2 cursor-pointer mb-2">
+                  <input type="checkbox" checked={allowAll} onChange={(e) => setAllowAll(e.target.checked)} className="rounded border-gray-300 text-golplus-blue-600" />
+                  <span className="text-sm text-gray-700">Liberar todos os tipos</span>
+                </label>
+                {!allowAll && (
+                  <div className="grid grid-cols-2 gap-1.5 pl-1">
+                    {requestTypes.map((rt) => (
+                      <label key={rt.type} className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={permissions.includes(rt.type)} onChange={() => togglePermission(rt.type)} className="rounded border-gray-300 text-golplus-blue-600" />
+                        <span className="text-sm text-gray-700">{rt.icon} {rt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {!allowAll && permissions.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-2">⚠ Sem tipos selecionados: este usuário não poderá abrir nenhuma solicitação.</p>
+                )}
+              </>
+            )}
           </div>
           {isEdit && (
             <div className="flex items-center gap-2">
@@ -122,14 +167,15 @@ export default function Users() {
                 <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Nome</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Perfil</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Pode abrir</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Departamento</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {isLoading && <tr><td colSpan={6} className="text-center py-8 text-gray-500 text-sm">Carregando...</td></tr>}
-              {!isLoading && users.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-500 text-sm">Nenhum usuário encontrado</td></tr>}
+              {isLoading && <tr><td colSpan={7} className="text-center py-8 text-gray-500 text-sm">Carregando...</td></tr>}
+              {!isLoading && users.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-500 text-sm">Nenhum usuário encontrado</td></tr>}
               {users.map((u) => (
                 <tr key={u.id} className="hover:bg-gray-50">
                   <td className="px-5 py-3">
@@ -143,6 +189,20 @@ export default function Users() {
                   <td className="px-5 py-3 text-sm text-gray-600">{u.email}</td>
                   <td className="px-5 py-3">
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-golplus-blue-100 text-golplus-blue-800">{roleLabel(u.role)}</span>
+                  </td>
+                  <td className="px-5 py-3">
+                    {u.role === 'ADMIN' || u.requestPermissions == null ? (
+                      <span className="text-xs text-gray-500">Todos os tipos</span>
+                    ) : u.requestPermissions.length === 0 ? (
+                      <span className="text-xs text-amber-600">Nenhum</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {u.requestPermissions.map((t) => {
+                          const rt = requestTypes.find((x) => x.type === t);
+                          return <span key={t} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-700">{rt ? `${rt.icon} ${rt.label}` : t}</span>;
+                        })}
+                      </div>
+                    )}
                   </td>
                   <td className="px-5 py-3 text-sm text-gray-600">{u.department?.name || '-'}</td>
                   <td className="px-5 py-3">

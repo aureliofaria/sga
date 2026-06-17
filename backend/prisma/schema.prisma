@@ -13,6 +13,7 @@ model User {
   email        String      @unique
   passwordHash String
   role         String      @default("USER")
+  requestPermissions String? // JSON array of allowed request types; null = todos os tipos
   departmentId String?
   department   Department? @relation(fields: [departmentId], references: [id])
   sectorId     String?

@@ -32,6 +32,7 @@ export interface User {
   name: string;
   email: string;
   role: 'ADMIN' | 'MANAGER' | 'FINANCE' | 'HR' | 'USER';
+  requestPermissions?: string[] | null; // null = todos os tipos liberados
   departmentId?: string;
   department?: Department;
   isActive: boolean;

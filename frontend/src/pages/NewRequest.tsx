@@ -5,6 +5,7 @@ import { flowsApi, requestsApi, resourcesApi } from '../services/api';
 import { FlowTypeBadge } from '../components/StatusBadge';
 import FileUpload from '../components/FileUpload';
 import Header from '../components/Header';
+import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import type { FlowTemplate } from '../types';
 
@@ -17,6 +18,11 @@ const flowTypes = [
 
 export default function NewRequest() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  // ADMIN ou requestPermissions null/undefined = todos os tipos liberados
+  const allowedTypes = user && user.role !== 'ADMIN' && user.requestPermissions != null
+    ? flowTypes.filter((ft) => user.requestPermissions!.includes(ft.type))
+    : flowTypes;
   const [step, setStep] = useState(1);
   const [selectedType, setSelectedType] = useState('');
   const [selectedFlow, setSelectedFlow] = useState<FlowTemplate | null>(null);
@@ -126,8 +132,11 @@ export default function NewRequest() {
         {step === 1 && (
           <div>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Selecione o Tipo de Solicitação</h2>
+            {allowedTypes.length === 0 && (
+              <p className="text-sm text-amber-600 text-center py-8">Você não possui permissão para abrir nenhum tipo de solicitação. Contate um administrador.</p>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {flowTypes.map((ft) => (
+              {allowedTypes.map((ft) => (
                 <button
                   key={ft.type}
                   onClick={() => { setSelectedType(ft.type); setSelectedFlow(null); }}

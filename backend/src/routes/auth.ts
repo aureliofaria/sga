@@ -3,9 +3,10 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { serializeUser } from '../lib/users';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'sga-secret-2024';
+const JWT_SECRET = process.env.JWT_SECRET || 'aprova-secret-2024';
 
 router.post('/login', async (req: Request, res: Response) => {
   try {
@@ -28,8 +29,7 @@ router.post('/login', async (req: Request, res: Response) => {
       return;
     }
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    const { passwordHash: _, ...userOut } = user;
-    res.json({ token, user: userOut });
+    res.json({ token, user: serializeUser(user) });
   } catch (err) {
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -60,16 +60,14 @@ router.post('/register', async (req: Request, res: Response) => {
       include: { department: true },
     });
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    const { passwordHash: _, ...userOut } = user;
-    res.status(201).json({ token, user: userOut });
+    res.status(201).json({ token, user: serializeUser(user) });
   } catch (err) {
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
 router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
-  const { passwordHash: _, ...userOut } = req.user;
-  res.json(userOut);
+  res.json(serializeUser(req.user));
 });
 
 export default router;

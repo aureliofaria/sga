@@ -3,6 +3,7 @@ import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { upload } from '../middleware/upload';
 import { createRequestTasks, advanceRequest } from '../services/workflow';
+import { canOpenRequestType } from '../lib/users';
 import path from 'path';
 
 const router = Router();
@@ -68,6 +69,11 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 
     const flow = await prisma.flowTemplate.findUnique({ where: { id: flowId } });
     if (!flow) { res.status(404).json({ error: 'Fluxo não encontrado' }); return; }
+
+    if (!canOpenRequestType(req.user, flow.type)) {
+      res.status(403).json({ error: 'Você não tem permissão para abrir este tipo de solicitação' });
+      return;
+    }
 
     const request = await prisma.request.create({
       data: {
