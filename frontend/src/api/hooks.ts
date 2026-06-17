@@ -8,6 +8,8 @@ import type {
   Comment,
   CommentInput,
   CreateRequestInput,
+  DashboardFilters,
+  DashboardReport,
   Department,
   FlowTemplate,
   Notification,
@@ -87,6 +89,23 @@ export function useMe(enabled = true) {
     enabled,
     queryFn: async () => {
       const { data } = await api.get<User>('/auth/me');
+      return data;
+    },
+  });
+}
+
+export function useDashboard(filters: DashboardFilters, enabled = true) {
+  return useQuery({
+    queryKey: ['reports', 'dashboard', filters],
+    enabled,
+    queryFn: async () => {
+      const params: Record<string, string> = {};
+      if (filters.from) params.from = filters.from;
+      if (filters.to) params.to = filters.to;
+      if (filters.flowType) params.flowType = filters.flowType;
+      const { data } = await api.get<DashboardReport>('/reports/dashboard', {
+        params,
+      });
       return data;
     },
   });

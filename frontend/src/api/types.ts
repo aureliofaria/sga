@@ -133,6 +133,40 @@ export interface NotificationPreferenceInput {
   enabled: boolean;
 }
 
+export interface DashboardReport {
+  range: { from: string; to: string };
+  totals: {
+    requests: number;
+    open: number;
+    completed: number;
+    rejected: number;
+  };
+  statusCounts: {
+    PENDING: number;
+    IN_PROGRESS: number;
+    COMPLETED: number;
+    REJECTED: number;
+    CANCELLED: number;
+  };
+  byFlowType: { type: string; name: string; count: number }[];
+  sla: {
+    onTime: number;
+    late: number;
+    overduePending: number;
+    pendingOnTrack: number;
+    noSla: number;
+    complianceRate: number | null;
+    avgCompletionHours: number | null;
+  };
+  throughput: { date: string; created: number; completed: number }[];
+}
+
+export interface DashboardFilters {
+  from?: string;
+  to?: string;
+  flowType?: string;
+}
+
 export interface CreateRequestInput {
   flowId: string;
   title: string;

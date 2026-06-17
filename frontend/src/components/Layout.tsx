@@ -11,6 +11,7 @@ const baseNavItems = [
 ];
 
 const AUDIT_ROLES = ['ADMIN', 'DIRETOR'];
+const DASHBOARD_ROLES = ['ADMIN', 'DIRETOR', 'MANAGER'];
 
 export default function Layout() {
   const { logout } = useAuth();
@@ -19,9 +20,12 @@ export default function Layout() {
   const navigate = useNavigate();
   const unreadCount = unread?.count ?? 0;
   const canAudit = me ? AUDIT_ROLES.includes(me.role) : false;
-  const navItems = canAudit
-    ? [...baseNavItems, { to: '/audit', label: 'Auditoria' }]
-    : baseNavItems;
+  const canDashboard = me ? DASHBOARD_ROLES.includes(me.role) : false;
+  const navItems = [
+    ...(canDashboard ? [{ to: '/dashboard', label: 'Dashboard' }] : []),
+    ...baseNavItems,
+    ...(canAudit ? [{ to: '/audit', label: 'Auditoria' }] : []),
+  ];
 
   return (
     <div className="min-h-screen">

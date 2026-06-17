@@ -3,7 +3,93 @@ import { Link, useParams } from 'react-router-dom';
 import { useAddComment, useComments, useRequest } from '../api/hooks';
 import { formatCents, formatDate } from '../lib/format';
 import StatusBadge from '../components/StatusBadge';
-import type { FlowStep } from '../api/types';
+import type { AuditLog, FlowStep, RequestDetail as RequestDetailType } from '../api/types';
+
+const ACTION_LABELS: Record<string, string> = {
+  CREATED: 'Solicitação criada',
+  STEP_STARTED: 'Etapa iniciada',
+  APPROVED: 'Aprovado',
+  REJECTED: 'Rejeitado',
+  COMPLETED: 'Concluída',
+  CANCELLED: 'Cancelada',
+  COMMENT_ADDED: 'Comentário',
+};
+
+const ACTION_DOT_COLORS: Record<string, string> = {
+  CREATED: 'bg-brand',
+  STEP_STARTED: 'bg-amber-400',
+  APPROVED: 'bg-green-500',
+  COMPLETED: 'bg-green-500',
+  REJECTED: 'bg-red-500',
+  CANCELLED: 'bg-red-500',
+  COMMENT_ADDED: 'bg-slate-400',
+};
+
+function actionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? action;
+}
+
+function actionDotColor(action: string): string {
+  return ACTION_DOT_COLORS[action] ?? 'bg-slate-300';
+}
+
+/** Task fields the request-detail timeline relies on, beyond the base Task type. */
+interface StepTask {
+  id: string;
+  status: string;
+  dueDate?: string | null;
+  completedAt?: string | null;
+  step?: { id?: string; order?: number } | null;
+}
+
+type StepState = 'DONE' | 'CURRENT' | 'PENDING' | 'STOPPED';
+
+interface SlaInfo {
+  label: string;
+  cls: string;
+}
+
+const STATE_LABELS: Record<StepState, string> = {
+  DONE: 'Concluída',
+  CURRENT: 'Em andamento',
+  PENDING: 'Pendente',
+  STOPPED: 'Interrompida',
+};
+
+function earliest(dates: (string | null | undefined)[]): string | null {
+  const valid = dates.filter((d): d is string => Boolean(d));
+  if (!valid.length) return null;
+  return valid.reduce((a, b) => (new Date(a) <= new Date(b) ? a : b));
+}
+
+function latest(dates: (string | null | undefined)[]): string | null {
+  const valid = dates.filter((d): d is string => Boolean(d));
+  if (!valid.length) return null;
+  return valid.reduce((a, b) => (new Date(a) >= new Date(b) ? a : b));
+}
+
+function deriveSla(
+  state: StepState,
+  dueDate: string | null,
+  completedAt: string | null
+): SlaInfo {
+  if (state === 'DONE') {
+    if (!dueDate) return { label: 'Sem SLA', cls: 'bg-slate-200 text-slate-700' };
+    const onTime = completedAt ? new Date(completedAt) <= new Date(dueDate) : false;
+    return onTime
+      ? { label: 'No prazo', cls: 'bg-green-100 text-green-800' }
+      : { label: 'Atrasado', cls: 'bg-red-100 text-red-800' };
+  }
+  if (state === 'STOPPED') {
+    return { label: '—', cls: 'bg-slate-100 text-slate-500' };
+  }
+  // CURRENT or PENDING
+  if (!dueDate) return { label: '—', cls: 'bg-slate-100 text-slate-500' };
+  const overdue = new Date() > new Date(dueDate);
+  return overdue
+    ? { label: 'Vencido', cls: 'bg-red-100 text-red-800' }
+    : { label: 'No prazo', cls: 'bg-green-100 text-green-800' };
+}
 
 function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -64,6 +150,8 @@ export default function RequestDetail() {
         )}
       </section>
 
+      <StepsTimeline req={req} />
+
       <section className="rounded-lg border border-slate-200 bg-white p-5">
         <h2 className="mb-3 text-sm font-semibold uppercase text-slate-500">
           Tarefas
@@ -115,31 +203,120 @@ export default function RequestDetail() {
 
       <Comments requestId={req.id} steps={req.flow?.steps} />
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5">
-        <h2 className="mb-3 text-sm font-semibold uppercase text-slate-500">
-          Histórico
-        </h2>
-        {!req.auditLogs?.length ? (
-          <p className="text-sm text-slate-500">Sem registros.</p>
-        ) : (
-          <ol className="space-y-3 border-l-2 border-slate-100 pl-4">
-            {req.auditLogs.map((log) => (
-              <li key={log.id} className="relative text-sm">
-                <span className="absolute -left-[21px] top-1 h-2 w-2 rounded-full bg-brand" />
-                <div className="font-medium text-slate-800">{log.action}</div>
-                {log.message && (
-                  <div className="text-slate-600">{log.message}</div>
-                )}
-                <div className="text-xs text-slate-400">
-                  {log.actor?.name ? `${log.actor.name} · ` : ''}
-                  {formatDate(log.createdAt)}
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      <Timeline logs={req.auditLogs} />
     </div>
+  );
+}
+
+function Timeline({ logs }: { logs?: AuditLog[] }) {
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5">
+      <h2 className="mb-3 text-sm font-semibold uppercase text-slate-500">
+        Linha do tempo
+      </h2>
+      {!logs?.length ? (
+        <p className="text-sm text-slate-500">Sem registros.</p>
+      ) : (
+        <ol className="space-y-4 border-l-2 border-slate-100 pl-5">
+          {logs.map((log) => (
+            <li key={log.id} className="relative text-sm">
+              <span
+                className={`absolute -left-[26px] top-1 h-3 w-3 rounded-full ring-2 ring-white ${actionDotColor(
+                  log.action
+                )}`}
+              />
+              <div className="font-medium text-slate-800">
+                {actionLabel(log.action)}
+              </div>
+              {log.details && (
+                <div className="text-slate-600">{log.details}</div>
+              )}
+              <div className="text-xs text-slate-400">
+                {log.userName ? `${log.userName} · ` : ''}
+                {formatDate(log.createdAt)}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+function StepsTimeline({ req }: { req: RequestDetailType }) {
+  const steps = (req.flow?.steps ?? []) as FlowStep[];
+  if (!steps.length) return null;
+
+  const tasks = (req.tasks ?? []) as unknown as StepTask[];
+  const currentStep =
+    typeof req.currentStep === 'number'
+      ? req.currentStep
+      : Number(req.currentStep);
+  const status = req.status?.toUpperCase();
+  const isStopped = status === 'REJECTED' || status === 'CANCELLED';
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5">
+      <h2 className="mb-3 text-sm font-semibold uppercase text-slate-500">
+        Etapas
+      </h2>
+      <ol className="space-y-3">
+        {steps.map((step, idx) => {
+          const order = step.order ?? idx + 1;
+
+          let state: StepState;
+          if (
+            (!Number.isNaN(currentStep) && currentStep > order) ||
+            status === 'COMPLETED'
+          ) {
+            state = 'DONE';
+          } else if (
+            !Number.isNaN(currentStep) &&
+            currentStep === order &&
+            (status === 'PENDING' || status === 'IN_PROGRESS')
+          ) {
+            state = 'CURRENT';
+          } else if (isStopped && !Number.isNaN(currentStep) && order >= currentStep) {
+            state = 'STOPPED';
+          } else {
+            state = 'PENDING';
+          }
+
+          const stepTasks = tasks.filter(
+            (t) => t.step?.order != null && t.step.order === order
+          );
+          const dueDate = earliest(stepTasks.map((t) => t.dueDate));
+          const completedAt = latest(
+            stepTasks
+              .filter((t) => t.status?.toUpperCase() === 'COMPLETED')
+              .map((t) => t.completedAt)
+          );
+          const sla = deriveSla(state, dueDate, completedAt);
+
+          return (
+            <li
+              key={step.id ?? idx}
+              className="flex items-center justify-between gap-3 text-sm"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
+                  {order}
+                </span>
+                <span className="truncate text-slate-800">
+                  {step.name ?? `Etapa ${order}`}
+                </span>
+                <StatusBadge status={STATE_LABELS[state]} />
+              </div>
+              <span
+                className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${sla.cls}`}
+              >
+                {sla.label}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 

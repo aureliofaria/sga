@@ -9,6 +9,7 @@ import NewRequest from './pages/NewRequest';
 import Notifications from './pages/Notifications';
 import NotificationPreferences from './pages/NotificationPreferences';
 import AuditLog from './pages/AuditLog';
+import Dashboard from './pages/Dashboard';
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/preferences" element={<NotificationPreferences />} />
           <Route path="/audit" element={<AuditLog />} />
+          <Route path="/dashboard" element={<Dashboard />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
