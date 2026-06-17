@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useMe, useUnreadCount } from '../api/hooks';
 import { useAuth } from '../auth/AuthContext';
 
-const navItems = [
+const baseNavItems = [
   { to: '/tasks', label: 'Minhas Tarefas' },
   { to: '/requests', label: 'Solicitações' },
   { to: '/requests/new', label: 'Nova Solicitação' },
@@ -10,12 +10,18 @@ const navItems = [
   { to: '/preferences', label: 'Preferências' },
 ];
 
+const AUDIT_ROLES = ['ADMIN', 'DIRETOR'];
+
 export default function Layout() {
   const { logout } = useAuth();
   const { data: me } = useMe();
   const { data: unread } = useUnreadCount();
   const navigate = useNavigate();
   const unreadCount = unread?.count ?? 0;
+  const canAudit = me ? AUDIT_ROLES.includes(me.role) : false;
+  const navItems = canAudit
+    ? [...baseNavItems, { to: '/audit', label: 'Auditoria' }]
+    : baseNavItems;
 
   return (
     <div className="min-h-screen">

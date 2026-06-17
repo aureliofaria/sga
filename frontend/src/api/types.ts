@@ -34,10 +34,25 @@ export interface RequestSummary {
 
 export interface AuditLog {
   id: string;
+  requestId?: string;
+  userId?: string;
+  userName?: string;
   action: string;
-  message?: string;
+  details?: string | null;
   createdAt: string;
+  request?: { title: string } | null;
+  /** @deprecated legacy fields kept for request-detail history rendering */
+  message?: string;
   actor?: { name?: string } | null;
+}
+
+export interface AuditLogFilters {
+  requestId?: string;
+  userId?: string;
+  action?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
 }
 
 export interface Approval {

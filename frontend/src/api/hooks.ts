@@ -3,6 +3,8 @@ import { api } from './client';
 import type {
   Approval,
   ApprovalInput,
+  AuditLog,
+  AuditLogFilters,
   Comment,
   CommentInput,
   CreateRequestInput,
@@ -16,6 +18,68 @@ import type {
   Task,
   User,
 } from './types';
+
+/** Build an axios params object from defined (non-empty) filter values. */
+function buildAuditParams(filters: AuditLogFilters): Record<string, string | number> {
+  const params: Record<string, string | number> = {};
+  if (filters.requestId) params.requestId = filters.requestId;
+  if (filters.userId) params.userId = filters.userId;
+  if (filters.action) params.action = filters.action;
+  if (filters.from) params.from = filters.from;
+  if (filters.to) params.to = filters.to;
+  if (filters.limit != null) params.limit = filters.limit;
+  return params;
+}
+
+export function useAuditLogs(filters: AuditLogFilters, enabled = true) {
+  return useQuery({
+    queryKey: ['audit-logs', filters],
+    enabled,
+    queryFn: async () => {
+      const { data } = await api.get<AuditLog[]>('/audit-logs', {
+        params: buildAuditParams(filters),
+      });
+      return data;
+    },
+  });
+}
+
+export function useAuditActions(enabled = true) {
+  return useQuery({
+    queryKey: ['audit-logs', 'actions'],
+    enabled,
+    queryFn: async () => {
+      const { data } = await api.get<string[]>('/audit-logs/actions');
+      return data;
+    },
+  });
+}
+
+/** Download the audit logs export as an authenticated .xlsx blob. */
+export async function exportAuditLogs(filters: AuditLogFilters): Promise<void> {
+  const response = await api.get('/audit-logs/export', {
+    params: buildAuditParams(filters),
+    responseType: 'blob',
+  });
+
+  let filename = 'auditoria-aprova.xlsx';
+  const disposition = response.headers['content-disposition'] as
+    | string
+    | undefined;
+  if (disposition) {
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+    if (match?.[1]) filename = decodeURIComponent(match[1]);
+  }
+
+  const url = window.URL.createObjectURL(response.data as Blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+}
 
 export function useMe(enabled = true) {
   return useQuery({
