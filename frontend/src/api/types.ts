@@ -29,7 +29,7 @@ export interface RequestSummary {
   amountCents?: number | null;
   createdAt: string;
   initiator?: { name: string };
-  flow?: { name: string };
+  flow?: { name: string; steps?: FlowStep[] };
 }
 
 export interface AuditLog {
@@ -69,6 +69,53 @@ export interface RequestDetail extends RequestSummary {
 export interface Department {
   id: string;
   name: string;
+}
+
+export interface Comment {
+  id: string;
+  requestId: string;
+  stepOrder: number | null;
+  body: string;
+  createdAt: string;
+  author: { id: string; name: string };
+}
+
+export interface CommentInput {
+  body: string;
+  stepOrder?: number | null;
+}
+
+export type NotificationChannel = 'IN_APP' | 'TEAMS' | 'OUTLOOK';
+
+export type NotificationEventType =
+  | 'TASK_ASSIGNED'
+  | 'REQUEST_REJECTED'
+  | 'REQUEST_COMPLETED'
+  | 'COMMENT_ADDED';
+
+export interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  channel: string;
+  status: string;
+  requestId: string | null;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface NotificationPreference {
+  id: string;
+  channel: NotificationChannel;
+  eventType: NotificationEventType;
+  enabled: boolean;
+}
+
+export interface NotificationPreferenceInput {
+  channel: NotificationChannel;
+  eventType: NotificationEventType;
+  enabled: boolean;
 }
 
 export interface CreateRequestInput {

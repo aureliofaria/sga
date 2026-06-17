@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useRequest } from '../api/hooks';
+import { useAddComment, useComments, useRequest } from '../api/hooks';
 import { formatCents, formatDate } from '../lib/format';
 import StatusBadge from '../components/StatusBadge';
+import type { FlowStep } from '../api/types';
 
 function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -112,6 +113,8 @@ export default function RequestDetail() {
         )}
       </section>
 
+      <Comments requestId={req.id} steps={req.flow?.steps} />
+
       <section className="rounded-lg border border-slate-200 bg-white p-5">
         <h2 className="mb-3 text-sm font-semibold uppercase text-slate-500">
           Histórico
@@ -137,5 +140,111 @@ export default function RequestDetail() {
         )}
       </section>
     </div>
+  );
+}
+
+function Comments({
+  requestId,
+  steps,
+}: {
+  requestId: string;
+  steps?: FlowStep[];
+}) {
+  const { data: comments, isLoading, isError } = useComments(requestId);
+  const addComment = useAddComment(requestId);
+  const [body, setBody] = useState('');
+  const [stepValue, setStepValue] = useState('');
+
+  function submit() {
+    const trimmed = body.trim();
+    if (!trimmed) return;
+    const stepOrder = stepValue === '' ? null : Number(stepValue);
+    addComment.mutate(
+      { body: trimmed, stepOrder },
+      {
+        onSuccess: () => {
+          setBody('');
+        },
+      }
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5">
+      <h2 className="mb-3 text-sm font-semibold uppercase text-slate-500">
+        Comentários
+      </h2>
+
+      {isLoading && <p className="text-sm text-slate-500">Carregando...</p>}
+      {isError && (
+        <p className="text-sm text-red-600">Erro ao carregar comentários.</p>
+      )}
+
+      {!isLoading && !isError && !comments?.length && (
+        <p className="text-sm text-slate-500">Nenhum comentário ainda.</p>
+      )}
+
+      {!!comments?.length && (
+        <ul className="space-y-3">
+          {comments.map((c) => (
+            <li key={c.id} className="text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-slate-800">
+                  {c.author?.name ?? '—'}
+                </span>
+                {c.stepOrder != null && (
+                  <span className="rounded bg-brand-50 px-1.5 py-0.5 text-xs font-medium text-brand-700">
+                    Etapa {c.stepOrder}
+                  </span>
+                )}
+                <span className="text-xs text-slate-400">
+                  {formatDate(c.createdAt)}
+                </span>
+              </div>
+              <p className="mt-0.5 whitespace-pre-wrap text-slate-700">
+                {c.body}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-4 border-t border-slate-100 pt-4">
+        {!!steps?.length && (
+          <select
+            value={stepValue}
+            onChange={(e) => setStepValue(e.target.value)}
+            className="mb-2 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-brand"
+          >
+            <option value="">Geral</option>
+            {steps.map((step, idx) => {
+              const order = step.order ?? idx + 1;
+              return (
+                <option key={step.id ?? idx} value={order}>
+                  Etapa {order}
+                  {step.name ? ` — ${step.name}` : ''}
+                </option>
+              );
+            })}
+          </select>
+        )}
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          rows={3}
+          placeholder="Escreva um comentário..."
+          className="w-full rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-brand"
+        />
+        <div className="mt-2">
+          <button
+            onClick={submit}
+            disabled={!body.trim() || addComment.isPending}
+            className="rounded bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-60"
+          >
+            Comentar
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
