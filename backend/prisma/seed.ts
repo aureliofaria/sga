@@ -48,8 +48,8 @@ async function main() {
         description: 'Admissão de novo colaborador',
         steps: {
           create: [
-            { order: 0, name: 'Aprovação do Gestor', requiredRole: 'MANAGER', requiredApprovers: 1 },
-            { order: 1, name: 'Execução RH', requiredRole: 'USER', requiredApprovers: 1, requiresAttachment: true },
+            { order: 0, name: 'Aprovação do Gestor', requiredRole: 'MANAGER', requiredApprovers: 1, deadlineHours: 48 },
+            { order: 1, name: 'Execução RH', requiredRole: 'USER', requiredApprovers: 1, requiresAttachment: true, deadlineHours: 72 },
           ],
         },
       },
@@ -65,8 +65,8 @@ async function main() {
         description: 'Desligamento de colaborador',
         steps: {
           create: [
-            { order: 0, name: 'Aprovação do Gestor', requiredRole: 'MANAGER', requiredApprovers: 1 },
-            { order: 1, name: 'Aprovação Diretoria', requiredRole: 'DIRETOR', requiredApprovers: 1 },
+            { order: 0, name: 'Aprovação do Gestor', requiredRole: 'MANAGER', requiredApprovers: 1, deadlineHours: 24 },
+            { order: 1, name: 'Aprovação Diretoria', requiredRole: 'DIRETOR', requiredApprovers: 1, deadlineHours: 48 },
           ],
         },
       },
@@ -87,14 +87,15 @@ async function main() {
               order: 0,
               name: 'Aprovação por Alçada',
               requiredApprovers: 1,
+              deadlineHours: 24,
               authLevels: {
                 create: [
                   // até R$ 5.000,00 -> gestor
-                  { name: 'Até R$ 5.000', minValueCents: 0, maxValueCents: 500000, approverRole: 'MANAGER', requiredApprovers: 1 },
+                  { name: 'Até R$ 5.000', minValueCents: 0, maxValueCents: 500000, approverRole: 'MANAGER', requiredApprovers: 1, deadlineHours: 24 },
                   // R$ 5.000,01 a R$ 50.000,00 -> diretor
-                  { name: 'R$ 5.000 a R$ 50.000', minValueCents: 500001, maxValueCents: 5000000, approverRole: 'DIRETOR', requiredApprovers: 1 },
+                  { name: 'R$ 5.000 a R$ 50.000', minValueCents: 500001, maxValueCents: 5000000, approverRole: 'DIRETOR', requiredApprovers: 1, deadlineHours: 16 },
                   // acima de R$ 50.000,00 -> CFO, dois aprovadores
-                  { name: 'Acima de R$ 50.000', minValueCents: 5000001, maxValueCents: null, approverRole: 'CFO', requiredApprovers: 2 },
+                  { name: 'Acima de R$ 50.000', minValueCents: 5000001, maxValueCents: null, approverRole: 'CFO', requiredApprovers: 2, deadlineHours: 8 },
                 ],
               },
             },
