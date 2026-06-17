@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -20,8 +20,11 @@ model User {
   updatedAt    DateTime    @updatedAt
 
   initiatedRequests Request[]     @relation("Initiator")
+  targetedRequests  Request[]     @relation("TargetEmployee")
   assignedTasks     RequestTask[]
   approvals         Approval[]
+
+  @@index([role])
 }
 
 model Department {
@@ -29,6 +32,8 @@ model Department {
   name      String
   createdAt DateTime @default(now())
   users     User[]
+
+  targetedRequests Request[] @relation("TargetDepartment")
 }
 
 model FlowTemplate {
@@ -51,11 +56,14 @@ model FlowStep {
   name               String
   description        String?
   requiredRole       String?
+  requiredApprovers  Int                  @default(1)
   requiresAttachment Boolean              @default(false)
   deadlineHours      Int?
   authLevels         AuthorizationLevel[]
   tasks              RequestTask[]
   createdAt          DateTime             @default(now())
+
+  @@index([flowTemplateId])
 }
 
 model AuthorizationLevel {
@@ -63,27 +71,34 @@ model AuthorizationLevel {
   flowStepId        String
   flowStep          FlowStep @relation(fields: [flowStepId], references: [id], onDelete: Cascade)
   name              String
-  minValue          Float?
-  maxValue          Float?
+  // Monetary bounds stored as integer cents to avoid floating point errors.
+  minValueCents     Int?
+  maxValueCents     Int?
   requiredApprovers Int      @default(1)
   approverRole      String
   deadlineHours     Int?
+
+  @@index([flowStepId])
 }
 
 model Request {
   id               String        @id @default(cuid())
   flowId           String
-  flow             FlowTemplate  @relation(fields: [flowId], references: [id])
+  flow             FlowTemplate  @relation(fields: [flowId], references: [id], onDelete: Restrict)
   initiatorId      String
-  initiator        User          @relation("Initiator", fields: [initiatorId], references: [id])
+  initiator        User          @relation("Initiator", fields: [initiatorId], references: [id], onDelete: Restrict)
   title            String
   description      String?
   status           String        @default("PENDING")
   currentStep      Int           @default(0)
-  targetEmployee   String?
-  targetDepartment String?
-  startDate        String?
-  amount           Float?
+  // Onboarding/offboarding targets reference real entities for integrity.
+  targetEmployeeId   String?
+  targetEmployee     User?       @relation("TargetEmployee", fields: [targetEmployeeId], references: [id], onDelete: SetNull)
+  targetDepartmentId String?
+  targetDepartment   Department? @relation("TargetDepartment", fields: [targetDepartmentId], references: [id], onDelete: SetNull)
+  startDate        DateTime?
+  // Monetary amount stored as integer cents.
+  amountCents      Int?
   currency         String        @default("BRL")
   supplier         String?
   costCenter       String?
@@ -94,6 +109,11 @@ model Request {
   auditLogs        AuditLog[]
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
+
+  @@index([status])
+  @@index([currentStep])
+  @@index([initiatorId])
+  @@index([flowId])
 }
 
 model RequestTask {
@@ -101,9 +121,9 @@ model RequestTask {
   requestId   String
   request     Request      @relation(fields: [requestId], references: [id], onDelete: Cascade)
   stepId      String
-  step        FlowStep     @relation(fields: [stepId], references: [id])
+  step        FlowStep     @relation(fields: [stepId], references: [id], onDelete: Restrict)
   assigneeId  String
-  assignee    User         @relation(fields: [assigneeId], references: [id])
+  assignee    User         @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
   title       String
   description String?
   status      String       @default("PENDING")
@@ -113,6 +133,10 @@ model RequestTask {
   attachments Attachment[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
+
+  @@index([assigneeId])
+  @@index([status])
+  @@index([requestId])
 }
 
 model Attachment {
@@ -135,11 +159,15 @@ model Approval {
   requestId  String
   request    Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
   approverId String
-  approver   User     @relation(fields: [approverId], references: [id])
+  approver   User     @relation(fields: [approverId], references: [id], onDelete: Restrict)
   stepOrder  Int
   decision   String
   comments   String?
   createdAt  DateTime @default(now())
+
+  // Four-eyes integrity: a given approver may only register one decision per step.
+  @@unique([requestId, approverId, stepOrder])
+  @@index([requestId])
 }
 
 model AuditLog {
@@ -151,4 +179,6 @@ model AuditLog {
   action    String
   details   String?
   createdAt DateTime @default(now())
+
+  @@index([requestId])
 }

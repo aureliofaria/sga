@@ -58,9 +58,18 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     const isAdmin = req.user.role === 'ADMIN';
     if (!isSelf && !isAdmin) { res.status(403).json({ error: 'Acesso negado' }); return; }
     const { name, email, role, departmentId, isActive, password } = req.body;
-    const data: any = {};
+    const data: Record<string, unknown> = {};
     if (name) data.name = name;
-    if (email) data.email = email;
+    if (email) {
+      // Guard the unique constraint explicitly to return a clean 409 instead
+      // of a generic 500 (audit finding M7).
+      const clash = await prisma.user.findUnique({ where: { email } });
+      if (clash && clash.id !== req.params.id) {
+        res.status(409).json({ error: 'Email já cadastrado' });
+        return;
+      }
+      data.email = email;
+    }
     if (isAdmin && role) data.role = role;
     if (isAdmin && departmentId !== undefined) data.departmentId = departmentId;
     if (isAdmin && isActive !== undefined) data.isActive = isActive;
