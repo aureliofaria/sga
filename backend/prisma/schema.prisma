@@ -19,18 +19,26 @@ model User {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
-  initiatedRequests    Request[]           @relation("Initiator")
-  assignedTasks        RequestTask[]
-  approvals            Approval[]
-  inventoryMovements   InventoryMovement[] @relation("InventoryMovementCreator")
-  inventoryCounts      InventoryCount[]    @relation("InventoryCountCreator")
+  initiatedRequests     Request[]        @relation("Initiator")
+  assignedTasks         RequestTask[]
+  approvals             Approval[]
+  assetsInPossession    Asset[]          @relation("AssetUser")
+  assetMovementsFrom    AssetMovement[]  @relation("MovOrigemUser")
+  assetMovementsTo      AssetMovement[]  @relation("MovDestinoUser")
+  assetMovementsCreated AssetMovement[]  @relation("MovCreator")
+  inventoryCounts       InventoryCount[] @relation("InventoryCountCreator")
 }
 
 model Department {
   id        String   @id @default(cuid())
   name      String
   createdAt DateTime @default(now())
-  users     User[]
+
+  users              User[]
+  assets             Asset[]
+  assetMovementsFrom AssetMovement[]  @relation("MovOrigemDept")
+  assetMovementsTo   AssetMovement[]  @relation("MovDestinoDept")
+  inventoryCounts    InventoryCount[]
 }
 
 model FlowTemplate {
@@ -73,30 +81,30 @@ model AuthorizationLevel {
 }
 
 model Request {
-  id               String        @id @default(cuid())
+  id               String          @id @default(cuid())
   flowId           String
-  flow             FlowTemplate  @relation(fields: [flowId], references: [id])
+  flow             FlowTemplate    @relation(fields: [flowId], references: [id])
   initiatorId      String
-  initiator        User          @relation("Initiator", fields: [initiatorId], references: [id])
+  initiator        User            @relation("Initiator", fields: [initiatorId], references: [id])
   title            String
   description      String?
-  status           String        @default("PENDING")
-  currentStep      Int           @default(0)
+  status           String          @default("PENDING")
+  currentStep      Int             @default(0)
   targetEmployee   String?
   targetDepartment String?
   startDate        String?
   amount           Float?
-  currency         String        @default("BRL")
+  currency         String          @default("BRL")
   supplier         String?
   costCenter       String?
   justification    String?
-  tasks              RequestTask[]
-  attachments        Attachment[]
-  approvals          Approval[]
-  auditLogs          AuditLog[]
-  inventoryMovements InventoryMovement[]
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  tasks            RequestTask[]
+  attachments      Attachment[]
+  approvals        Approval[]
+  auditLogs        AuditLog[]
+  assetMovements   AssetMovement[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 }
 
 model RequestTask {
@@ -158,105 +166,138 @@ model AuditLog {
 
 // ─── Inventário ───────────────────────────────────────────────────────────────
 
+// Catálogo de tipos/modelos de item
 model InventoryItem {
-  id          String              @id @default(cuid())
-  code        String              @unique
+  id          String   @id @default(cuid())
+  code        String   @unique
   name        String
   description String?
-  unit        String              @default("UN")
-  category    String?
-  isActive    Boolean             @default(true)
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  // TI | ADMINISTRATIVO
+  type        String
+  // HARDWARE | PERIFERICO | SMARTPHONE | CHIP | MOBILIARIO | OUTROS
+  category    String
+  brand       String?
+  model       String?
+  unit        String   @default("UN")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  stocks      Stock[]
-  movements   InventoryMovement[]
-  countItems  InventoryCountItem[]
+  assets Asset[]
 }
 
+// Almoxarifado / local de guarda (para itens não alocados a um setor)
 model Warehouse {
-  id          String              @id @default(cuid())
-  code        String              @unique
+  id          String   @id @default(cuid())
+  code        String   @unique
   name        String
   description String?
-  isActive    Boolean             @default(true)
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  stocks      Stock[]
-  movements   InventoryMovement[]
-  countItems  InventoryCountItem[]
+  assets Asset[]
 }
 
-model Stock {
-  id          String    @id @default(cuid())
-  itemId      String
-  item        InventoryItem @relation(fields: [itemId], references: [id])
-  warehouseId String
-  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
-  quantity    Float     @default(0)
-  minQuantity Float?
-  maxQuantity Float?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+// Ativo físico individual — cada unidade patrimonial rastreada
+model Asset {
+  id            String        @id @default(cuid())
+  itemId        String
+  item          InventoryItem @relation(fields: [itemId], references: [id])
+  // número de patrimônio / etiqueta
+  tag           String?       @unique
+  serialNumber  String?
+  // IMEI para smartphones
+  imei          String?
+  // número da linha para chips/SIM cards
+  phoneNumber   String?
+  // DISPONIVEL | ATIVO | MANUTENCAO | EMPRESTADO | RESERVADO | DESCARTADO
+  status        String        @default("DISPONIVEL")
+  // NOVO | BOM | REGULAR | RUIM
+  condition     String        @default("BOM")
+  purchaseDate  DateTime?
+  supplier      String?
+  invoiceNumber String?
+  invoiceValue  Float?
+  // localização (almoxarifado — quando não alocado a departamento)
+  warehouseId   String?
+  warehouse     Warehouse?    @relation(fields: [warehouseId], references: [id])
+  // setor/departamento responsável atual
+  departmentId  String?
+  department    Department?   @relation(fields: [departmentId], references: [id])
+  // usuário em posse atual
+  userId        String?
+  user          User?         @relation("AssetUser", fields: [userId], references: [id])
+  notes         String?
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
-  movements   InventoryMovement[]
-  countItems  InventoryCountItem[]
-
-  @@unique([itemId, warehouseId])
+  movements  AssetMovement[]
+  countItems InventoryCountItem[]
 }
 
-model InventoryMovement {
-  id               String        @id @default(cuid())
-  itemId           String
-  item             InventoryItem @relation(fields: [itemId], references: [id])
-  warehouseId      String
-  warehouse        Warehouse     @relation(fields: [warehouseId], references: [id])
-  stockId          String
-  stock            Stock         @relation(fields: [stockId], references: [id])
-  // Tipo: ENTRADA | SAIDA | AJUSTE | TRANSFERENCIA
+// Registro imutável de cada movimentação de ativo patrimonial
+model AssetMovement {
+  id               String      @id @default(cuid())
+  assetId          String
+  asset            Asset       @relation(fields: [assetId], references: [id])
+  // ENTRADA | ALOCACAO | DEVOLUCAO | MANUTENCAO | RETORNO_MANUTENCAO
+  // DESCARTE | TRANSFERENCIA | EMPRESTIMO | AJUSTE_STATUS
   type             String
-  quantity         Float
-  previousQuantity Float
-  currentQuantity  Float
-  // Vínculo opcional com solicitação APROVA
+  movementDate     DateTime    @default(now())
+  fromDepartmentId String?
+  fromDepartment   Department? @relation("MovOrigemDept", fields: [fromDepartmentId], references: [id])
+  toDepartmentId   String?
+  toDepartment     Department? @relation("MovDestinoDept", fields: [toDepartmentId], references: [id])
+  fromUserId       String?
+  fromUser         User?       @relation("MovOrigemUser", fields: [fromUserId], references: [id])
+  toUserId         String?
+  toUser           User?       @relation("MovDestinoUser", fields: [toUserId], references: [id])
+  previousStatus   String?
+  newStatus        String?
+  // vínculo opcional com solicitação do workflow APROVA
   requestId        String?
-  request          Request?      @relation(fields: [requestId], references: [id])
+  request          Request?    @relation(fields: [requestId], references: [id])
   reason           String?
   notes            String?
   createdById      String
-  createdBy        User          @relation("InventoryMovementCreator", fields: [createdById], references: [id])
-  createdAt        DateTime      @default(now())
+  createdBy        User        @relation("MovCreator", fields: [createdById], references: [id])
+  createdAt        DateTime    @default(now())
 }
 
+// Sessão de contagem física (inventário periódico)
 model InventoryCount {
-  id          String               @id @default(cuid())
-  // Status: RASCUNHO | EM_ANDAMENTO | CONCLUIDA | CANCELADA
-  status      String               @default("RASCUNHO")
-  notes       String?
-  createdById String
-  createdBy   User                 @relation("InventoryCountCreator", fields: [createdById], references: [id])
-  completedAt DateTime?
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
+  id           String               @id @default(cuid())
+  // RASCUNHO | EM_ANDAMENTO | CONCLUIDA | CANCELADA
+  status       String               @default("RASCUNHO")
+  // GERAL | TI | ADMINISTRATIVO | SETOR
+  type         String               @default("GERAL")
+  departmentId String?
+  department   Department?          @relation(fields: [departmentId], references: [id])
+  notes        String?
+  createdById  String
+  createdBy    User                 @relation("InventoryCountCreator", fields: [createdById], references: [id])
+  completedAt  DateTime?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
 
-  items       InventoryCountItem[]
+  items InventoryCountItem[]
 }
 
+// Item individual dentro de uma sessão de contagem
 model InventoryCountItem {
-  id               String         @id @default(cuid())
-  countId          String
-  count            InventoryCount @relation(fields: [countId], references: [id], onDelete: Cascade)
-  stockId          String
-  stock            Stock          @relation(fields: [stockId], references: [id])
-  itemId           String
-  item             InventoryItem  @relation(fields: [itemId], references: [id])
-  warehouseId      String
-  warehouse        Warehouse      @relation(fields: [warehouseId], references: [id])
-  expectedQuantity Float
-  countedQuantity  Float?
-  difference       Float?
-  notes            String?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id            String         @id @default(cuid())
+  countId       String
+  count         InventoryCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  assetId       String
+  asset         Asset          @relation(fields: [assetId], references: [id])
+  // encontrado na contagem física?
+  found         Boolean?
+  foundLocation String?
+  notes         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([countId, assetId])
 }
