@@ -1,0 +1,293 @@
+import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
+
+const prisma = new PrismaClient();
+
+async function main() {
+  console.log('Iniciando seed...');
+
+  // Departments
+  const ti = await prisma.department.create({ data: { name: 'TI' } });
+  const rh = await prisma.department.create({ data: { name: 'RH' } });
+  const financeiro = await prisma.department.create({ data: { name: 'Financeiro' } });
+  const comercial = await prisma.department.create({ data: { name: 'Comercial' } });
+  const operacoes = await prisma.department.create({ data: { name: 'Operações' } });
+
+  console.log('Departamentos criados');
+
+  const hash = await bcrypt.hash('senha123', 10);
+
+  // Users
+  const admin = await prisma.user.create({
+    data: { name: 'Administrador SGA', email: 'admin@sga.com', passwordHash: hash, role: 'ADMIN' },
+  });
+  const anaRH = await prisma.user.create({
+    data: { name: 'Ana Silva', email: 'rh@sga.com', passwordHash: hash, role: 'HR', departmentId: rh.id },
+  });
+  const carlosFinanceiro = await prisma.user.create({
+    data: { name: 'Carlos Souza', email: 'financeiro@sga.com', passwordHash: hash, role: 'FINANCE', departmentId: financeiro.id },
+  });
+  const robertoGestor = await prisma.user.create({
+    data: { name: 'Roberto Lima', email: 'gestor@sga.com', passwordHash: hash, role: 'MANAGER', departmentId: comercial.id },
+  });
+  const joao = await prisma.user.create({
+    data: { name: 'João Santos', email: 'joao@sga.com', passwordHash: hash, role: 'USER', departmentId: ti.id },
+  });
+
+  console.log('Usuários criados');
+
+  // Flow 1: Admissão de Colaborador
+  const admissaoFlow = await prisma.flowTemplate.create({
+    data: {
+      name: 'Admissão de Colaborador',
+      description: 'Processo completo de admissão de novo colaborador',
+      type: 'ONBOARDING',
+      isActive: true,
+    },
+  });
+
+  const admissaoStep1 = await prisma.flowStep.create({
+    data: {
+      flowTemplateId: admissaoFlow.id,
+      order: 0,
+      name: 'Documentação RH',
+      description: 'Coleta e validação de documentos do colaborador',
+      requiredRole: 'HR',
+      requiresAttachment: true,
+      deadlineHours: 48,
+    },
+  });
+  const admissaoStep2 = await prisma.flowStep.create({
+    data: {
+      flowTemplateId: admissaoFlow.id,
+      order: 1,
+      name: 'Configuração TI',
+      description: 'Criação de acessos e configuração de equipamentos',
+      requiredRole: 'USER',
+      requiresAttachment: false,
+      deadlineHours: 24,
+    },
+  });
+  const admissaoStep3 = await prisma.flowStep.create({
+    data: {
+      flowTemplateId: admissaoFlow.id,
+      order: 2,
+      name: 'Cadastro Financeiro',
+      description: 'Cadastro de dados bancários e benefícios',
+      requiredRole: 'FINANCE',
+      requiresAttachment: false,
+      deadlineHours: 24,
+    },
+  });
+  const admissaoStep4 = await prisma.flowStep.create({
+    data: {
+      flowTemplateId: admissaoFlow.id,
+      order: 3,
+      name: 'Boas-vindas do Gestor',
+      description: 'Apresentação da equipe e integração',
+      requiredRole: 'MANAGER',
+      requiresAttachment: false,
+      deadlineHours: 8,
+    },
+  });
+
+  // Flow 2: Desligamento de Colaborador
+  const desligamentoFlow = await prisma.flowTemplate.create({
+    data: {
+      name: 'Desligamento de Colaborador',
+      description: 'Processo de offboarding e desligamento do colaborador',
+      type: 'OFFBOARDING',
+      isActive: true,
+    },
+  });
+
+  await prisma.flowStep.createMany({
+    data: [
+      { flowTemplateId: desligamentoFlow.id, order: 0, name: 'Solicitação do Gestor', description: 'Formalização da solicitação de desligamento', requiredRole: 'MANAGER', requiresAttachment: false, deadlineHours: 24 },
+      { flowTemplateId: desligamentoFlow.id, order: 1, name: 'Entrevista de Desligamento', description: 'Entrevista de saída com RH', requiredRole: 'HR', requiresAttachment: true, deadlineHours: 48 },
+      { flowTemplateId: desligamentoFlow.id, order: 2, name: 'Revogação de Acessos TI', description: 'Remoção de todos os acessos e devolução de equipamentos', requiredRole: 'USER', requiresAttachment: false, deadlineHours: 8 },
+      { flowTemplateId: desligamentoFlow.id, order: 3, name: 'Acertos Financeiros', description: 'Cálculo e processamento de verbas rescisórias', requiredRole: 'FINANCE', requiresAttachment: true, deadlineHours: 72 },
+    ],
+  });
+
+  // Flow 3: Solicitação de Pagamento
+  const pagamentoFlow = await prisma.flowTemplate.create({
+    data: {
+      name: 'Solicitação de Pagamento',
+      description: 'Aprovação e processamento de pagamentos',
+      type: 'PAYMENT',
+      isActive: true,
+    },
+  });
+
+  await prisma.flowStep.create({
+    data: {
+      flowTemplateId: pagamentoFlow.id,
+      order: 0,
+      name: 'Solicitação',
+      description: 'Detalhamento da solicitação de pagamento',
+      requiredRole: 'USER',
+      requiresAttachment: false,
+    },
+  });
+
+  const pagamentoStep2 = await prisma.flowStep.create({
+    data: {
+      flowTemplateId: pagamentoFlow.id,
+      order: 1,
+      name: 'Aprovação do Gestor',
+      description: 'Análise e aprovação pelo gestor responsável',
+      requiredRole: 'MANAGER',
+      requiresAttachment: false,
+      deadlineHours: 24,
+    },
+  });
+
+  await prisma.authorizationLevel.createMany({
+    data: [
+      { flowStepId: pagamentoStep2.id, name: 'Até R$ 5.000', minValue: 0, maxValue: 5000, requiredApprovers: 1, approverRole: 'MANAGER', deadlineHours: 24 },
+      { flowStepId: pagamentoStep2.id, name: 'R$ 5.001 a R$ 50.000', minValue: 5001, maxValue: 50000, requiredApprovers: 1, approverRole: 'FINANCE', deadlineHours: 48 },
+      { flowStepId: pagamentoStep2.id, name: 'Acima de R$ 50.000', minValue: 50001, maxValue: null, requiredApprovers: 1, approverRole: 'ADMIN', deadlineHours: 72 },
+    ],
+  });
+
+  await prisma.flowStep.create({
+    data: {
+      flowTemplateId: pagamentoFlow.id,
+      order: 2,
+      name: 'Processamento Financeiro',
+      description: 'Processamento e efetivação do pagamento',
+      requiredRole: 'FINANCE',
+      requiresAttachment: true,
+      deadlineHours: 48,
+    },
+  });
+
+  // Flow 4: Solicitação de Compra
+  const compraFlow = await prisma.flowTemplate.create({
+    data: {
+      name: 'Solicitação de Compra',
+      description: 'Processo de aprovação de compras',
+      type: 'PURCHASE',
+      isActive: true,
+    },
+  });
+
+  await prisma.flowStep.create({
+    data: { flowTemplateId: compraFlow.id, order: 0, name: 'Requisição', description: 'Detalhamento da necessidade de compra', requiredRole: 'USER' },
+  });
+
+  const compraStep2 = await prisma.flowStep.create({
+    data: { flowTemplateId: compraFlow.id, order: 1, name: 'Aprovação Gerencial', description: 'Análise e aprovação da compra', requiredRole: 'MANAGER', deadlineHours: 24 },
+  });
+
+  await prisma.authorizationLevel.createMany({
+    data: [
+      { flowStepId: compraStep2.id, name: 'Até R$ 5.000', minValue: 0, maxValue: 5000, requiredApprovers: 1, approverRole: 'MANAGER', deadlineHours: 24 },
+      { flowStepId: compraStep2.id, name: 'R$ 5.001 a R$ 50.000', minValue: 5001, maxValue: 50000, requiredApprovers: 1, approverRole: 'FINANCE', deadlineHours: 48 },
+      { flowStepId: compraStep2.id, name: 'Acima de R$ 50.000', minValue: 50001, maxValue: null, requiredApprovers: 1, approverRole: 'ADMIN', deadlineHours: 72 },
+    ],
+  });
+
+  await prisma.flowStep.create({
+    data: { flowTemplateId: compraFlow.id, order: 2, name: 'Validação Financeira', description: 'Verificação orçamentária e processamento', requiredRole: 'FINANCE', requiresAttachment: true, deadlineHours: 48 },
+  });
+
+  console.log('Fluxos criados');
+
+  // Sample requests
+  // 1. Completed onboarding request
+  const onboardingRequest = await prisma.request.create({
+    data: {
+      flowId: admissaoFlow.id,
+      initiatorId: anaRH.id,
+      title: 'Admissão - Maria Fernanda Costa',
+      description: 'Processo de admissão para a vaga de Analista de Marketing',
+      status: 'COMPLETED',
+      currentStep: 3,
+      targetEmployee: 'Maria Fernanda Costa',
+      targetDepartment: 'Comercial',
+      startDate: '2026-07-01',
+    },
+  });
+
+  await prisma.auditLog.createMany({
+    data: [
+      { requestId: onboardingRequest.id, userId: anaRH.id, userName: 'Ana Silva', action: 'CREATED', details: 'Solicitação criada', createdAt: new Date('2026-06-10T09:00:00') },
+      { requestId: onboardingRequest.id, userId: anaRH.id, userName: 'Ana Silva', action: 'STEP_STARTED', details: 'Etapa iniciada: Documentação RH', createdAt: new Date('2026-06-10T09:01:00') },
+      { requestId: onboardingRequest.id, userId: anaRH.id, userName: 'Ana Silva', action: 'TASK_COMPLETED', details: 'Tarefa concluída: Documentação RH', createdAt: new Date('2026-06-11T14:00:00') },
+      { requestId: onboardingRequest.id, userId: joao.id, userName: 'João Santos', action: 'TASK_COMPLETED', details: 'Tarefa concluída: Configuração TI', createdAt: new Date('2026-06-12T10:00:00') },
+      { requestId: onboardingRequest.id, userId: carlosFinanceiro.id, userName: 'Carlos Souza', action: 'TASK_COMPLETED', details: 'Tarefa concluída: Cadastro Financeiro', createdAt: new Date('2026-06-13T11:00:00') },
+      { requestId: onboardingRequest.id, userId: robertoGestor.id, userName: 'Roberto Lima', action: 'TASK_COMPLETED', details: 'Tarefa concluída: Boas-vindas do Gestor', createdAt: new Date('2026-06-14T09:00:00') },
+      { requestId: onboardingRequest.id, userId: admin.id, userName: 'Sistema', action: 'COMPLETED', details: 'Solicitação concluída com sucesso', createdAt: new Date('2026-06-14T09:01:00') },
+    ],
+  });
+
+  // 2. In-progress payment request
+  const paymentRequest = await prisma.request.create({
+    data: {
+      flowId: pagamentoFlow.id,
+      initiatorId: joao.id,
+      title: 'Pagamento - Licença de Software Figma',
+      description: 'Renovação anual da licença do Figma para a equipe de design',
+      status: 'IN_PROGRESS',
+      currentStep: 1,
+      amount: 3500,
+      supplier: 'Figma Inc.',
+      costCenter: 'TI-001',
+      justification: 'Ferramenta essencial para o time de design e produto',
+    },
+  });
+
+  await prisma.requestTask.create({
+    data: {
+      requestId: paymentRequest.id,
+      stepId: pagamentoStep2.id,
+      assigneeId: robertoGestor.id,
+      title: 'Aprovação do Gestor',
+      description: 'Análise e aprovação pelo gestor responsável',
+      status: 'PENDING',
+      dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    },
+  });
+
+  await prisma.auditLog.createMany({
+    data: [
+      { requestId: paymentRequest.id, userId: joao.id, userName: 'João Santos', action: 'CREATED', details: 'Solicitação criada: Pagamento - Licença de Software Figma' },
+      { requestId: paymentRequest.id, userId: admin.id, userName: 'Sistema', action: 'STEP_STARTED', details: 'Etapa iniciada: Aprovação do Gestor' },
+    ],
+  });
+
+  // 3. Pending purchase request
+  const purchaseRequest = await prisma.request.create({
+    data: {
+      flowId: compraFlow.id,
+      initiatorId: joao.id,
+      title: 'Compra - Equipamentos de Escritório',
+      description: 'Aquisição de monitores e teclados para a equipe de TI',
+      status: 'IN_PROGRESS',
+      currentStep: 0,
+      amount: 12000,
+      supplier: 'TechStore Ltda',
+      costCenter: 'TI-002',
+      justification: 'Substituição de equipamentos com mais de 5 anos de uso',
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: { requestId: purchaseRequest.id, userId: joao.id, userName: 'João Santos', action: 'CREATED', details: 'Solicitação criada: Compra - Equipamentos de Escritório' },
+  });
+
+  console.log('Solicitações de exemplo criadas');
+  console.log('\nSeed concluído com sucesso!');
+  console.log('\nUsuários de demonstração:');
+  console.log('  admin@sga.com    (ADMIN)   - senha: senha123');
+  console.log('  rh@sga.com       (HR)      - senha: senha123');
+  console.log('  financeiro@sga.com (FINANCE) - senha: senha123');
+  console.log('  gestor@sga.com   (MANAGER) - senha: senha123');
+  console.log('  joao@sga.com     (USER)    - senha: senha123');
+}
+
+main()
+  .catch((e) => { console.error(e); process.exit(1); })
+  .finally(async () => { await prisma.$disconnect(); });
