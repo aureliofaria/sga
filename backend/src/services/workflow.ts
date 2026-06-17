@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
+import { notify } from './notifications';
 
 type Tx = Prisma.TransactionClient;
 
@@ -128,6 +129,13 @@ export async function createRequestTasks(
         dueDate,
       },
     });
+    await notify(tx, {
+      userId: assignee.id,
+      type: 'TASK_ASSIGNED',
+      title: `Nova tarefa: ${step.name}`,
+      body: `Você foi designado para a etapa "${step.name}" da solicitação "${request.title}".`,
+      requestId,
+    });
   }
 
   await tx.auditLog.create({
@@ -221,6 +229,13 @@ export async function advanceRequest(tx: Tx, requestId: string): Promise<void> {
         action: 'COMPLETED',
         details: 'Solicitação concluída com sucesso',
       },
+    });
+    await notify(tx, {
+      userId: request.initiatorId,
+      type: 'REQUEST_COMPLETED',
+      title: 'Solicitação concluída',
+      body: `Sua solicitação "${request.title}" foi concluída.`,
+      requestId,
     });
   }
 }

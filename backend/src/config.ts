@@ -42,4 +42,8 @@ export const config = {
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean),
+  // External notification dispatch (Teams/Outlook via M365) is OFF by default.
+  // It must stay disabled until a corporate account is configured and human
+  // validation is in place before any external send (security/LGPD constraint).
+  externalNotificationsEnabled: process.env.NOTIFICATIONS_EXTERNAL_ENABLED === 'true',
 } as const;

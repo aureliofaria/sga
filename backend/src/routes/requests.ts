@@ -4,6 +4,7 @@ import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { validateBody } from '../lib/validate';
 import { startRequest } from '../services/workflow';
+import { notifyMany } from '../services/notifications';
 
 const router = Router();
 
@@ -114,6 +115,10 @@ router.get('/:id', authenticate, async (req: ExpressRequest, res: Response) => {
         tasks: { include: { assignee: { select: { id: true, name: true } } } },
         approvals: { include: { approver: { select: { id: true, name: true } } } },
         attachments: true,
+        comments: {
+          include: { author: { select: { id: true, name: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
         auditLogs: { orderBy: { createdAt: 'asc' } },
       },
     });
@@ -174,5 +179,122 @@ router.post('/:id/cancel', authenticate, async (req: ExpressRequest, res: Respon
     res.status(500).json({ error: 'Erro ao cancelar solicitação' });
   }
 });
+
+// --- Comentários por etapa (Prioridade 2 — Comunicação e Colaboração) ---
+
+const commentSchema = z.object({
+  body: z.string().trim().min(1, 'O comentário não pode ser vazio'),
+  stepOrder: z.number().int().nonnegative().nullish(),
+});
+
+async function loadInvolvement(requestId: string) {
+  return prisma.request.findUnique({
+    where: { id: requestId },
+    select: {
+      id: true,
+      title: true,
+      initiatorId: true,
+      tasks: { select: { assigneeId: true } },
+      approvals: { select: { approverId: true } },
+    },
+  });
+}
+
+function canAccess(
+  user: AuthRequest['user'],
+  req: NonNullable<Awaited<ReturnType<typeof loadInvolvement>>>
+): boolean {
+  if (['ADMIN', 'DIRETOR'].includes(user.role)) return true;
+  return (
+    req.initiatorId === user.id ||
+    req.tasks.some((t) => t.assigneeId === user.id) ||
+    req.approvals.some((a) => a.approverId === user.id)
+  );
+}
+
+router.get('/:id/comments', authenticate, async (req: ExpressRequest, res: Response) => {
+  const { user } = req as AuthRequest;
+  try {
+    const involvement = await loadInvolvement(req.params.id);
+    if (!involvement) {
+      res.status(404).json({ error: 'Solicitação não encontrada' });
+      return;
+    }
+    if (!canAccess(user, involvement)) {
+      res.status(403).json({ error: 'Acesso negado' });
+      return;
+    }
+    const comments = await prisma.comment.findMany({
+      where: { requestId: req.params.id },
+      include: { author: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json(comments);
+  } catch {
+    res.status(500).json({ error: 'Erro ao buscar comentários' });
+  }
+});
+
+router.post(
+  '/:id/comments',
+  authenticate,
+  validateBody(commentSchema),
+  async (req: ExpressRequest, res: Response) => {
+    const { user } = req as AuthRequest;
+    const { body, stepOrder } = req.body as z.infer<typeof commentSchema>;
+    try {
+      const involvement = await loadInvolvement(req.params.id);
+      if (!involvement) {
+        res.status(404).json({ error: 'Solicitação não encontrada' });
+        return;
+      }
+      if (!canAccess(user, involvement)) {
+        res.status(403).json({ error: 'Acesso negado' });
+        return;
+      }
+      const comment = await prisma.$transaction(async (tx) => {
+        const created = await tx.comment.create({
+          data: {
+            requestId: req.params.id,
+            stepOrder: stepOrder ?? null,
+            authorId: user.id,
+            body,
+          },
+          include: { author: { select: { id: true, name: true } } },
+        });
+        await tx.auditLog.create({
+          data: {
+            requestId: req.params.id,
+            userId: user.id,
+            userName: user.name,
+            action: 'COMMENT_ADDED',
+            details: stepOrder != null ? `Comentário na etapa ${stepOrder}` : 'Comentário geral',
+          },
+        });
+        // Notify everyone involved except the author.
+        const recipients = [
+          involvement.initiatorId,
+          ...involvement.tasks.map((t) => t.assigneeId),
+          ...involvement.approvals.map((a) => a.approverId),
+        ];
+        await notifyMany(
+          tx,
+          recipients,
+          {
+            type: 'COMMENT_ADDED',
+            title: 'Novo comentário',
+            body: `${user.name} comentou em "${involvement.title}".`,
+            requestId: req.params.id,
+          },
+          user.id
+        );
+        return created;
+      });
+      res.status(201).json(comment);
+    } catch {
+      res.status(500).json({ error: 'Erro ao adicionar comentário' });
+    }
+  }
+);
 
 export default router;

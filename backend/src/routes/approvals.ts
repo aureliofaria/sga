@@ -5,6 +5,7 @@ import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { validateBody } from '../lib/validate';
 import { advanceRequest } from '../services/workflow';
+import { notify } from '../services/notifications';
 
 const router = Router();
 
@@ -95,6 +96,13 @@ router.post('/', authenticate, validateBody(decisionSchema), async (req: Express
           data: { status: 'CANCELLED' },
         });
         await tx.request.update({ where: { id: requestId }, data: { status: 'REJECTED' } });
+        await notify(tx, {
+          userId: request.initiatorId,
+          type: 'REQUEST_REJECTED',
+          title: 'Solicitação rejeitada',
+          body: `Sua solicitação "${request.title ?? ''}" foi rejeitada. Motivo: ${comments}`,
+          requestId,
+        });
       } else {
         await advanceRequest(tx, requestId);
       }

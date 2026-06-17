@@ -13,6 +13,7 @@ import taskRoutes from './routes/tasks';
 import approvalRoutes from './routes/approvals';
 import attachmentRoutes from './routes/attachments';
 import auditLogRoutes from './routes/audit-logs';
+import notificationRoutes from './routes/notifications';
 
 const app = express();
 
@@ -48,6 +49,7 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/approvals', approvalRoutes);
 app.use('/api/attachments', attachmentRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: 'Rota não encontrada' });

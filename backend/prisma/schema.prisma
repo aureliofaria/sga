@@ -23,6 +23,9 @@ model User {
   targetedRequests  Request[]     @relation("TargetEmployee")
   assignedTasks     RequestTask[]
   approvals         Approval[]
+  comments          Comment[]
+  notifications     Notification[]
+  notificationPreferences NotificationPreference[]
 
   @@index([role])
 }
@@ -107,6 +110,8 @@ model Request {
   attachments      Attachment[]
   approvals        Approval[]
   auditLogs        AuditLog[]
+  comments         Comment[]
+  notifications    Notification[]
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -181,4 +186,54 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@index([requestId])
+}
+
+// Per-step collaboration thread. `stepOrder` null = comment on the request as a
+// whole; otherwise the comment is scoped to that flow step.
+model Comment {
+  id        String   @id @default(cuid())
+  requestId String
+  request   Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  stepOrder Int?
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([requestId])
+  @@index([requestId, stepOrder])
+}
+
+// User-configurable delivery preferences. IN_APP is delivered immediately;
+// external channels (TEAMS/OUTLOOK) are stored but only dispatched once M365
+// integration is enabled — see Notification/notify service.
+model NotificationPreference {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel   String // IN_APP | TEAMS | OUTLOOK
+  eventType String // TASK_ASSIGNED | REQUEST_REJECTED | REQUEST_COMPLETED | COMMENT_ADDED
+  enabled   Boolean @default(true)
+
+  @@unique([userId, channel, eventType])
+  @@index([userId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestId String?
+  request   Request?  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String?
+  channel   String    @default("IN_APP") // IN_APP | TEAMS | OUTLOOK
+  // IN_APP: UNREAD -> READ. External channels are created as PENDING and would
+  // move to SENT by a future dispatcher (currently gated off).
+  status    String    @default("UNREAD")
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  @@index([userId, status])
 }
