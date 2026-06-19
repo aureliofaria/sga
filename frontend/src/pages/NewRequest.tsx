@@ -76,7 +76,8 @@ export default function NewRequest() {
         data.resourceIds = selectedResourceIds.length > 0 ? selectedResourceIds : undefined;
       }
       if (['PAYMENT', 'PURCHASE'].includes(selectedType)) {
-        data.amount = form.amount ? parseFloat(form.amount.replace(/[^0-9.]/g, '')) : undefined;
+        const reais = form.amount ? parseFloat(form.amount.replace(/[^0-9.]/g, '')) : NaN;
+        data.amountCents = Number.isFinite(reais) ? Math.round(reais * 100) : undefined;
         data.supplier = form.supplier;
         data.costCenter = form.costCenter;
         data.justification = form.justification;

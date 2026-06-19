@@ -44,8 +44,8 @@ export interface AuthorizationLevel {
   id: string;
   flowStepId: string;
   name: string;
-  minValue?: number;
-  maxValue?: number;
+  minValueCents?: number;
+  maxValueCents?: number;
   requiredApprovers: number;
   approverRole: string;
   deadlineHours?: number;
@@ -196,8 +196,8 @@ export interface Request {
   vacancyType?: string;
   replacementName?: string;
   resources?: RequestResource[];
-  // Financial
-  amount?: number;
+  // Financial — valor em centavos (inteiro)
+  amountCents?: number;
   currency: string;
   supplier?: string;
   costCenter?: string;

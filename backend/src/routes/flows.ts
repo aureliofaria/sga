@@ -146,9 +146,17 @@ router.delete('/:id/steps/:stepId', authenticate, requireRole('ADMIN'), async (r
 // Auth levels
 router.post('/:flowId/steps/:stepId/auth-levels', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { name, minValue, maxValue, requiredApprovers, approverRole, deadlineHours } = req.body;
+    const { name, minValueCents, maxValueCents, requiredApprovers, approverRole, deadlineHours } = req.body;
     const level = await prisma.authorizationLevel.create({
-      data: { flowStepId: req.params.stepId, name, minValue, maxValue, requiredApprovers: requiredApprovers ?? 1, approverRole, deadlineHours },
+      data: {
+        flowStepId: req.params.stepId,
+        name,
+        minValueCents: minValueCents != null ? Math.round(Number(minValueCents)) : null,
+        maxValueCents: maxValueCents != null ? Math.round(Number(maxValueCents)) : null,
+        requiredApprovers: requiredApprovers ?? 1,
+        approverRole,
+        deadlineHours,
+      },
     });
     res.status(201).json(level);
   } catch {
@@ -158,10 +166,17 @@ router.post('/:flowId/steps/:stepId/auth-levels', authenticate, requireRole('ADM
 
 router.put('/:flowId/steps/:stepId/auth-levels/:levelId', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { name, minValue, maxValue, requiredApprovers, approverRole, deadlineHours } = req.body;
+    const { name, minValueCents, maxValueCents, requiredApprovers, approverRole, deadlineHours } = req.body;
     const level = await prisma.authorizationLevel.update({
       where: { id: req.params.levelId },
-      data: { name, minValue, maxValue, requiredApprovers, approverRole, deadlineHours },
+      data: {
+        name,
+        minValueCents: minValueCents != null ? Math.round(Number(minValueCents)) : null,
+        maxValueCents: maxValueCents != null ? Math.round(Number(maxValueCents)) : null,
+        requiredApprovers,
+        approverRole,
+        deadlineHours,
+      },
     });
     res.json(level);
   } catch {

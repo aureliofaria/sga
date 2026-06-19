@@ -106,8 +106,8 @@ model AuthorizationLevel {
   flowStepId        String
   flowStep          FlowStep @relation(fields: [flowStepId], references: [id], onDelete: Cascade)
   name              String
-  minValue          Float?
-  maxValue          Float?
+  minValueCents     Int?
+  maxValueCents     Int?
   requiredApprovers Int      @default(1)
   approverRole      String
   deadlineHours     Int?
@@ -128,7 +128,7 @@ model Request {
   targetEmployee   String?
   targetDepartment String?
   startDate        String?
-  amount           Float?
+  amountCents      Int?
   currency         String        @default("BRL")
   supplier         String?
   costCenter       String?

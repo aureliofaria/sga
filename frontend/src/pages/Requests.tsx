@@ -17,8 +17,8 @@ export default function Requests() {
     queryFn: () => requestsApi.getAll({ status: statusFilter || undefined, type: typeFilter || undefined, search: search || undefined }),
   });
 
-  const formatCurrency = (amount?: number) =>
-    amount ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount) : '-';
+  const formatCurrency = (cents?: number) =>
+    cents != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100) : '-';
 
   return (
     <div>
@@ -102,7 +102,7 @@ export default function Requests() {
                   <td className="px-5 py-3"><FlowTypeBadge type={req.flow?.type} /></td>
                   <td className="px-5 py-3 text-sm text-gray-600">{req.initiator?.name}</td>
                   <td className="px-5 py-3"><StatusBadge status={req.status} /></td>
-                  <td className="px-5 py-3 text-sm text-gray-600">{formatCurrency(req.amount)}</td>
+                  <td className="px-5 py-3 text-sm text-gray-600">{formatCurrency(req.amountCents)}</td>
                   <td className="px-5 py-3 text-sm text-gray-500">
                     {format(new Date(req.createdAt), 'dd/MM/yyyy', { locale: ptBR })}
                   </td>

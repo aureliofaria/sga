@@ -145,9 +145,9 @@ async function main() {
 
   await prisma.authorizationLevel.createMany({
     data: [
-      { flowStepId: pagamentoStep2.id, name: 'Até R$ 5.000', minValue: 0, maxValue: 5000, requiredApprovers: 1, approverRole: 'MANAGER', deadlineHours: 24 },
-      { flowStepId: pagamentoStep2.id, name: 'R$ 5.001 a R$ 50.000', minValue: 5001, maxValue: 50000, requiredApprovers: 1, approverRole: 'FINANCE', deadlineHours: 48 },
-      { flowStepId: pagamentoStep2.id, name: 'Acima de R$ 50.000', minValue: 50001, maxValue: null, requiredApprovers: 1, approverRole: 'ADMIN', deadlineHours: 72 },
+      { flowStepId: pagamentoStep2.id, name: 'Até R$ 5.000', minValueCents: 0, maxValueCents: 500000, requiredApprovers: 1, approverRole: 'MANAGER', deadlineHours: 24 },
+      { flowStepId: pagamentoStep2.id, name: 'R$ 5.000,01 a R$ 50.000', minValueCents: 500001, maxValueCents: 5000000, requiredApprovers: 1, approverRole: 'FINANCE', deadlineHours: 48 },
+      { flowStepId: pagamentoStep2.id, name: 'Acima de R$ 50.000', minValueCents: 5000001, maxValueCents: null, requiredApprovers: 1, approverRole: 'ADMIN', deadlineHours: 72 },
     ],
   });
 
@@ -183,9 +183,9 @@ async function main() {
 
   await prisma.authorizationLevel.createMany({
     data: [
-      { flowStepId: compraStep2.id, name: 'Até R$ 5.000', minValue: 0, maxValue: 5000, requiredApprovers: 1, approverRole: 'MANAGER', deadlineHours: 24 },
-      { flowStepId: compraStep2.id, name: 'R$ 5.001 a R$ 50.000', minValue: 5001, maxValue: 50000, requiredApprovers: 1, approverRole: 'FINANCE', deadlineHours: 48 },
-      { flowStepId: compraStep2.id, name: 'Acima de R$ 50.000', minValue: 50001, maxValue: null, requiredApprovers: 1, approverRole: 'ADMIN', deadlineHours: 72 },
+      { flowStepId: compraStep2.id, name: 'Até R$ 5.000', minValueCents: 0, maxValueCents: 500000, requiredApprovers: 1, approverRole: 'MANAGER', deadlineHours: 24 },
+      { flowStepId: compraStep2.id, name: 'R$ 5.000,01 a R$ 50.000', minValueCents: 500001, maxValueCents: 5000000, requiredApprovers: 1, approverRole: 'FINANCE', deadlineHours: 48 },
+      { flowStepId: compraStep2.id, name: 'Acima de R$ 50.000', minValueCents: 5000001, maxValueCents: null, requiredApprovers: 1, approverRole: 'ADMIN', deadlineHours: 72 },
     ],
   });
 
@@ -232,7 +232,7 @@ async function main() {
       description: 'Renovação anual da licença do Figma para a equipe de design',
       status: 'IN_PROGRESS',
       currentStep: 1,
-      amount: 3500,
+      amountCents: 350000,
       supplier: 'Figma Inc.',
       costCenter: 'TI-001',
       justification: 'Ferramenta essencial para o time de design e produto',
@@ -267,7 +267,7 @@ async function main() {
       description: 'Aquisição de monitores e teclados para a equipe de TI',
       status: 'IN_PROGRESS',
       currentStep: 0,
-      amount: 12000,
+      amountCents: 1200000,
       supplier: 'TechStore Ltda',
       costCenter: 'TI-002',
       justification: 'Substituição de equipamentos com mais de 5 anos de uso',

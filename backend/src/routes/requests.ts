@@ -63,7 +63,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
 router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { flowId, title, description, targetEmployee, targetDepartment, startDate,
-            amount, supplier, costCenter, justification, vacancyType, replacementName,
+            amountCents, supplier, costCenter, justification, vacancyType, replacementName,
             resourceIds } = req.body;
     if (!flowId || !title) { res.status(400).json({ error: 'Fluxo e título são obrigatórios' }); return; }
 
@@ -86,7 +86,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         targetEmployee,
         targetDepartment,
         startDate,
-        amount: amount ? parseFloat(amount) : null,
+        amountCents: amountCents != null && amountCents !== '' ? Math.round(Number(amountCents)) : null,
         supplier,
         costCenter,
         justification,
@@ -135,7 +135,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 
 router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const { title, description, targetEmployee, targetDepartment, startDate, amount, supplier, costCenter, justification } = req.body;
+    const { title, description, targetEmployee, targetDepartment, startDate, amountCents, supplier, costCenter, justification } = req.body;
     const request = await prisma.request.findUnique({ where: { id: req.params.id } });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
     if (request.initiatorId !== req.user.id && req.user.role !== 'ADMIN') {
@@ -143,7 +143,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     }
     const updated = await prisma.request.update({
       where: { id: req.params.id },
-      data: { title, description, targetEmployee, targetDepartment, startDate, amount: amount ? parseFloat(amount) : undefined, supplier, costCenter, justification },
+      data: { title, description, targetEmployee, targetDepartment, startDate, amountCents: amountCents != null && amountCents !== '' ? Math.round(Number(amountCents)) : undefined, supplier, costCenter, justification },
     });
     res.json(updated);
   } catch {
@@ -173,7 +173,7 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
 // se a etapa tem alçada, o papel deve casar com o approverRole da faixa de valor;
 // caso contrário, qualquer papel de aprovador genérico.
 function authorizeDecision(
-  request: { initiatorId: string; amount: number | null; currentStep: number; flow: { steps: any[] } },
+  request: { initiatorId: string; amountCents: number | null; currentStep: number; flow: { steps: any[] } },
   user: { id: string; role: string }
 ): { ok: boolean; status: number; error: string } {
   if (request.initiatorId === user.id) {
@@ -185,9 +185,9 @@ function authorizeDecision(
   const authLevels = step?.authLevels ?? [];
 
   if (authLevels.length > 0) {
-    const amount = request.amount ?? 0;
+    const amount = request.amountCents ?? 0;
     const level =
-      authLevels.find((l: any) => amount >= (l.minValue ?? 0) && amount <= (l.maxValue ?? Infinity)) ??
+      authLevels.find((l: any) => amount >= (l.minValueCents ?? 0) && amount <= (l.maxValueCents ?? Infinity)) ??
       authLevels[authLevels.length - 1];
     if (user.role === level.approverRole) return { ok: true, status: 200, error: '' };
     return { ok: false, status: 403, error: 'Seu papel não tem alçada para aprovar esta etapa' };

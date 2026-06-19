@@ -10,8 +10,8 @@ import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
-const formatCurrency = (amount?: number) =>
-  amount ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount) : '-';
+const formatCurrency = (cents?: number) =>
+  cents != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100) : '-';
 
 function ActionModal({ title, onConfirm, onClose, action }: { title: string; onConfirm: (comments: string) => void; onClose: () => void; action: 'approve' | 'reject' }) {
   const [comments, setComments] = useState('');
@@ -182,7 +182,7 @@ export default function RequestDetail() {
                   {request.description && <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Descrição:</dt><dd className="text-sm text-gray-900">{request.description}</dd></div>}
                 </dl>
               </div>
-              {(request.targetEmployee || request.amount) && (
+              {(request.targetEmployee || request.amountCents != null) && (
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-3">
                     {request.targetEmployee ? 'Dados do Colaborador' : 'Dados Financeiros'}
@@ -191,7 +191,7 @@ export default function RequestDetail() {
                     {request.targetEmployee && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Colaborador:</dt><dd className="text-sm text-gray-900">{request.targetEmployee}</dd></div>}
                     {request.targetDepartment && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Departamento:</dt><dd className="text-sm text-gray-900">{request.targetDepartment}</dd></div>}
                     {request.startDate && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Data início:</dt><dd className="text-sm text-gray-900">{request.startDate}</dd></div>}
-                    {request.amount && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Valor:</dt><dd className="text-sm font-semibold text-gray-900">{formatCurrency(request.amount)}</dd></div>}
+                    {request.amountCents != null && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Valor:</dt><dd className="text-sm font-semibold text-gray-900">{formatCurrency(request.amountCents)}</dd></div>}
                     {request.supplier && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Fornecedor:</dt><dd className="text-sm text-gray-900">{request.supplier}</dd></div>}
                     {request.costCenter && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Centro de custo:</dt><dd className="text-sm text-gray-900">{request.costCenter}</dd></div>}
                     {request.justification && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Justificativa:</dt><dd className="text-sm text-gray-900">{request.justification}</dd></div>}

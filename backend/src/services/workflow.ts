@@ -14,15 +14,16 @@ function parseConditions(json: string | null | undefined): BranchCondition[] {
 
 function evaluateNextOrder(
   steps: Array<{ order: number; conditions: string | null }>,
-  request: { vacancyType?: string | null; amount?: number | null }
+  request: { vacancyType?: string | null; amountCents?: number | null }
 ): number | null {
   const conditions: BranchCondition[] = steps.flatMap(s => parseConditions(s.conditions));
   for (const cond of conditions) {
     if (cond.field === 'always' || cond.op === 'ALWAYS') return cond.targetOrder;
     if (cond.field === 'vacancyType' && cond.op === 'EQUALS' && request.vacancyType === cond.value) return cond.targetOrder;
-    if (cond.field === 'amount' && request.amount != null) {
-      const n = request.amount;
-      const v = parseFloat(cond.value ?? '0');
+    if (cond.field === 'amount' && request.amountCents != null) {
+      const n = request.amountCents;
+      // O valor da condição é informado em reais; converte para centavos.
+      const v = Math.round(parseFloat(cond.value ?? '0') * 100);
       if (cond.op === 'GT' && n > v) return cond.targetOrder;
       if (cond.op === 'LT' && n < v) return cond.targetOrder;
       if (cond.op === 'GTE' && n >= v) return cond.targetOrder;
@@ -237,11 +238,11 @@ export async function isStepComplete(requestId: string, stepOrder: number): Prom
     if (!stepTasks.every(t => t.status === 'COMPLETED')) return false;
 
     if (step.authLevels.length > 0) {
-      const amount = request.amount ?? 0;
+      const amount = request.amountCents ?? 0;
       let required = 1;
       for (const lvl of step.authLevels) {
-        const min = lvl.minValue ?? 0;
-        const max = lvl.maxValue ?? Infinity;
+        const min = lvl.minValueCents ?? 0;
+        const max = lvl.maxValueCents ?? Infinity;
         if (amount >= min && amount <= max) { required = lvl.requiredApprovers; break; }
       }
       const approved = new Set(
@@ -262,10 +263,10 @@ export async function checkAuthorizationLevel(requestId: string) {
   if (!request) return null;
   const currentStep = request.flow.steps.find(s => s.order === request.currentStep);
   if (!currentStep || currentStep.authLevels.length === 0) return null;
-  const amount = request.amount ?? 0;
+  const amount = request.amountCents ?? 0;
   for (const level of currentStep.authLevels) {
-    const min = level.minValue ?? 0;
-    const max = level.maxValue ?? Infinity;
+    const min = level.minValueCents ?? 0;
+    const max = level.maxValueCents ?? Infinity;
     if (amount >= min && amount <= max) return level;
   }
   return currentStep.authLevels[currentStep.authLevels.length - 1];

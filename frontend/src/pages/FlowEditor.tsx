@@ -49,6 +49,12 @@ export default function FlowEditor() {
       setSteps((existingFlow.steps || []).map((s) => ({
         ...s,
         conditions: typeof s.conditions === 'string' ? JSON.parse(s.conditions || '[]') : (s.conditions || []),
+        // Alçadas vêm em centavos da API; o editor trabalha em reais.
+        authLevels: (s.authLevels || []).map((lvl: any) => ({
+          ...lvl,
+          minValue: lvl.minValueCents != null ? lvl.minValueCents / 100 : '',
+          maxValue: lvl.maxValueCents != null ? lvl.maxValueCents / 100 : '',
+        })),
       })));
     }
   }, [existingFlow]);
@@ -170,8 +176,9 @@ export default function FlowEditor() {
           const lvl = step.authLevels[j];
           const lvlData = {
             name: lvl.name,
-            minValue: lvl.minValue !== '' ? parseFloat(lvl.minValue) : null,
-            maxValue: lvl.maxValue !== '' ? parseFloat(lvl.maxValue) : null,
+            // Inputs em reais → persistidos em centavos (inteiro).
+            minValueCents: lvl.minValue !== '' && lvl.minValue != null ? Math.round(parseFloat(lvl.minValue) * 100) : null,
+            maxValueCents: lvl.maxValue !== '' && lvl.maxValue != null ? Math.round(parseFloat(lvl.maxValue) * 100) : null,
             requiredApprovers: parseInt(lvl.requiredApprovers) || 1,
             approverRole: lvl.approverRole,
             deadlineHours: lvl.deadlineHours ? parseInt(lvl.deadlineHours) : null,
