@@ -140,8 +140,11 @@ o que reduz muito o atrito. Passos:
 
 ## 9. Faseamento sugerido
 
-- **Fase 1** — merge aditivo do backend de inventário da d2v3cr na consolidação
-  (modelos + rotas + seed), sem bridge. Inventário patrimonial funciona isolado.
+- **Fase 1** ✅ **concluída** — merge aditivo do backend de inventário da d2v3cr na
+  consolidação (modelos + rotas `/api/inventory` + seed + migration aditiva
+  `20260619140000_add_inventory_assets`), sem bridge. `invoiceValue` migrado para
+  `invoiceValueCents` (centavos) e papel `GESTOR` mapeado para `MANAGER`. Inventário
+  patrimonial funciona isolado.
 - **Fase 2** — bridge `RequestResource.assetId` + evolução do `advanceRequest`
   (alocação/devolução físicas dirigidas pelo workflow).
 - **Fase 3** — UI de inventário (catálogo, ativos, movimentações, contagem) e a

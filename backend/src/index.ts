@@ -12,6 +12,7 @@ import flowsRouter from './routes/flows';
 import requestsRouter from './routes/requests';
 import tasksRouter from './routes/tasks';
 import resourcesRouter from './routes/resources';
+import inventoryRouter from './routes/inventory';
 
 const app = express();
 const PORT = config.port;
@@ -49,6 +50,7 @@ app.use('/api/flows', flowsRouter);
 app.use('/api/requests', requestsRouter);
 app.use('/api/tasks', tasksRouter);
 app.use('/api/resources', resourcesRouter);
+app.use('/api/inventory', inventoryRouter);
 
 app.listen(PORT, () => console.log(`APROVA API rodando na porta ${PORT}`));
 export default app;

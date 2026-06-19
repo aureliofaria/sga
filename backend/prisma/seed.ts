@@ -302,6 +302,29 @@ async function main() {
   });
 
   console.log('Solicitações de exemplo criadas');
+
+  // Inventário patrimonial: almoxarifado padrão + catálogo inicial (TI e Administrativo)
+  const almoxarifado = await prisma.warehouse.create({
+    data: { code: 'ALM-01', name: 'Almoxarifado Central', description: 'Estoque central de TI e Administrativo' },
+  });
+  const catalogo = await Promise.all([
+    prisma.inventoryItem.create({ data: { code: 'NB-DELL-5430', name: 'Notebook Dell Latitude 5430', type: 'TI', category: 'HARDWARE', brand: 'Dell', model: 'Latitude 5430' } }),
+    prisma.inventoryItem.create({ data: { code: 'MON-LG-24', name: 'Monitor LG 24"', type: 'TI', category: 'PERIFERICO', brand: 'LG', model: '24MK430H' } }),
+    prisma.inventoryItem.create({ data: { code: 'SMART-SAMS-A54', name: 'Smartphone Samsung Galaxy A54', type: 'TI', category: 'SMARTPHONE', brand: 'Samsung', model: 'Galaxy A54' } }),
+    prisma.inventoryItem.create({ data: { code: 'CHIP-VIVO', name: 'Chip / Linha Telefônica Vivo', type: 'TI', category: 'CHIP', brand: 'Vivo', model: 'SIM' } }),
+    prisma.inventoryItem.create({ data: { code: 'CAD-EXEC', name: 'Cadeira Executiva', type: 'ADMINISTRATIVO', category: 'MOBILIARIO' } }),
+  ]);
+  // Algumas unidades físicas de exemplo, com movimentação de ENTRADA registrada.
+  const notebookItem = catalogo[0];
+  await prisma.asset.create({
+    data: {
+      itemId: notebookItem.id, tag: 'PAT-0001', serialNumber: 'SN-DELL-0001', status: 'DISPONIVEL', condition: 'NOVO',
+      supplier: 'Dell', invoiceNumber: 'NF-1001', invoiceValueCents: 450000, warehouseId: almoxarifado.id,
+      movements: { create: { type: 'ENTRADA', newStatus: 'DISPONIVEL', reason: 'Cadastro inicial', createdById: admin.id } },
+    },
+  });
+  console.log('Inventário patrimonial criado (almoxarifado + catálogo + ativo de exemplo)');
+
   console.log('\nSeed concluído com sucesso!');
   console.log('\nUsuários de demonstração:');
   console.log('  admin@sga.com    (ADMIN)   - senha: senha123');

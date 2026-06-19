@@ -8,24 +8,31 @@ datasource db {
 }
 
 model User {
-  id           String      @id @default(cuid())
-  name         String
-  email        String      @unique
-  passwordHash String
-  role         String      @default("USER")
+  id                 String      @id @default(cuid())
+  name               String
+  email              String      @unique
+  passwordHash       String
+  role               String      @default("USER")
   requestPermissions String? // JSON array of allowed request types; null = todos os tipos
-  departmentId String?
-  department   Department? @relation(fields: [departmentId], references: [id])
-  sectorId     String?
-  sector       Sector?     @relation("SectorMembers", fields: [sectorId], references: [id])
-  isActive     Boolean     @default(true)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  departmentId       String?
+  department         Department? @relation(fields: [departmentId], references: [id])
+  sectorId           String?
+  sector             Sector?     @relation("SectorMembers", fields: [sectorId], references: [id])
+  isActive           Boolean     @default(true)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
   initiatedRequests Request[]      @relation("Initiator")
   assignedTasks     RequestTask[]
   approvals         Approval[]
   sectorRoles       SectorMember[]
+
+  // Inventário patrimonial
+  assetsInPossession    Asset[]          @relation("AssetUser")
+  assetMovementsFrom    AssetMovement[]  @relation("MovOrigemUser")
+  assetMovementsTo      AssetMovement[]  @relation("MovDestinoUser")
+  assetMovementsCreated AssetMovement[]  @relation("MovCreator")
+  inventoryCounts       InventoryCount[] @relation("InventoryCountCreator")
 }
 
 model Department {
@@ -33,6 +40,12 @@ model Department {
   name      String
   createdAt DateTime @default(now())
   users     User[]
+
+  // Inventário patrimonial
+  assets             Asset[]
+  assetMovementsFrom AssetMovement[]  @relation("MovOrigemDept")
+  assetMovementsTo   AssetMovement[]  @relation("MovDestinoDept")
+  inventoryCounts    InventoryCount[]
 }
 
 model Sector {
@@ -43,13 +56,13 @@ model Sector {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  members         SectorMember[]
-  users           User[]         @relation("SectorMembers")
-  flowTemplates   FlowTemplate[] @relation("FlowSector")
-  flowSteps       FlowStep[]     @relation("StepSector")
-  activatedSteps  FlowStep[]     @relation("StepActivationSector")
-  requests        Request[]      @relation("RequestSector")
-  resourceItems   ResourceItem[] @relation("SectorResources")
+  members        SectorMember[]
+  users          User[]         @relation("SectorMembers")
+  flowTemplates  FlowTemplate[] @relation("FlowSector")
+  flowSteps      FlowStep[]     @relation("StepSector")
+  activatedSteps FlowStep[]     @relation("StepActivationSector")
+  requests       Request[]      @relation("RequestSector")
+  resourceItems  ResourceItem[] @relation("SectorResources")
 }
 
 model SectorMember {
@@ -58,7 +71,7 @@ model SectorMember {
   sector    Sector   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      String   // LIDER, PROTETOR
+  role      String // LIDER, PROTETOR
   createdAt DateTime @default(now())
 
   @@unique([sectorId, userId, role])
@@ -114,22 +127,22 @@ model AuthorizationLevel {
 }
 
 model Request {
-  id               String        @id @default(cuid())
+  id               String            @id @default(cuid())
   flowId           String
-  flow             FlowTemplate  @relation(fields: [flowId], references: [id])
+  flow             FlowTemplate      @relation(fields: [flowId], references: [id])
   initiatorId      String
-  initiator        User          @relation("Initiator", fields: [initiatorId], references: [id])
+  initiator        User              @relation("Initiator", fields: [initiatorId], references: [id])
   sectorId         String?
-  sector           Sector?       @relation("RequestSector", fields: [sectorId], references: [id])
+  sector           Sector?           @relation("RequestSector", fields: [sectorId], references: [id])
   title            String
   description      String?
-  status           String        @default("PENDING")
-  currentStep      Int           @default(0)
+  status           String            @default("PENDING")
+  currentStep      Int               @default(0)
   targetEmployee   String?
   targetDepartment String?
   startDate        String?
   amountCents      Int?
-  currency         String        @default("BRL")
+  currency         String            @default("BRL")
   supplier         String?
   costCenter       String?
   justification    String?
@@ -140,21 +153,22 @@ model Request {
   attachments      Attachment[]
   approvals        Approval[]
   auditLogs        AuditLog[]
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  assetMovements   AssetMovement[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 }
 
 model RequestTask {
-  id          String       @id @default(cuid())
-  requestId   String
-  request     Request      @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  stepId      String
-  step        FlowStep     @relation(fields: [stepId], references: [id])
-  assigneeId  String
-  assignee    User         @relation(fields: [assigneeId], references: [id])
-  title       String
-  description String?
-  status      String       @default("PENDING")
+  id           String       @id @default(cuid())
+  requestId    String
+  request      Request      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  stepId       String
+  step         FlowStep     @relation(fields: [stepId], references: [id])
+  assigneeId   String
+  assignee     User         @relation(fields: [assigneeId], references: [id])
+  title        String
+  description  String?
+  status       String       @default("PENDING")
   dueDate      DateTime?
   completedAt  DateTime?
   notes        String?
@@ -231,4 +245,140 @@ model RequestResource {
   createdAt      DateTime     @default(now())
 
   @@unique([requestId, resourceItemId])
+}
+
+// ===========================================================================
+// Inventário patrimonial (TI e Administrativo) — rastreio de ativos físicos,
+// movimentações (log imutável, vinculável a uma Request do workflow) e contagem.
+// ===========================================================================
+
+model InventoryItem {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  // TI | ADMINISTRATIVO
+  type        String
+  // HARDWARE | PERIFERICO | SMARTPHONE | CHIP | MOBILIARIO | OUTROS
+  category    String
+  brand       String?
+  model       String?
+  unit        String   @default("UN")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assets Asset[]
+}
+
+model Warehouse {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assets Asset[]
+}
+
+model Asset {
+  id                String        @id @default(cuid())
+  itemId            String
+  item              InventoryItem @relation(fields: [itemId], references: [id])
+  // número de patrimônio / etiqueta
+  tag               String?       @unique
+  serialNumber      String?
+  // IMEI para smartphones
+  imei              String?
+  // número da linha para chips/SIM cards
+  phoneNumber       String?
+  // DISPONIVEL | ATIVO | MANUTENCAO | EMPRESTADO | RESERVADO | DESCARTADO
+  status            String        @default("DISPONIVEL")
+  // NOVO | BOM | REGULAR | RUIM
+  condition         String        @default("BOM")
+  purchaseDate      DateTime?
+  supplier          String?
+  invoiceNumber     String?
+  // valor da NF em centavos (Int), consistente com o restante do APROVA
+  invoiceValueCents Int?
+  // localização (almoxarifado — quando não alocado a departamento)
+  warehouseId       String?
+  warehouse         Warehouse?    @relation(fields: [warehouseId], references: [id])
+  // setor/departamento responsável atual
+  departmentId      String?
+  department        Department?   @relation(fields: [departmentId], references: [id])
+  // usuário em posse atual
+  userId            String?
+  user              User?         @relation("AssetUser", fields: [userId], references: [id])
+  notes             String?
+  isActive          Boolean       @default(true)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  movements  AssetMovement[]
+  countItems InventoryCountItem[]
+}
+
+model AssetMovement {
+  id               String      @id @default(cuid())
+  assetId          String
+  asset            Asset       @relation(fields: [assetId], references: [id])
+  // ENTRADA | ALOCACAO | DEVOLUCAO | MANUTENCAO | RETORNO_MANUTENCAO
+  // DESCARTE | TRANSFERENCIA | EMPRESTIMO | AJUSTE_STATUS
+  type             String
+  movementDate     DateTime    @default(now())
+  fromDepartmentId String?
+  fromDepartment   Department? @relation("MovOrigemDept", fields: [fromDepartmentId], references: [id])
+  toDepartmentId   String?
+  toDepartment     Department? @relation("MovDestinoDept", fields: [toDepartmentId], references: [id])
+  fromUserId       String?
+  fromUser         User?       @relation("MovOrigemUser", fields: [fromUserId], references: [id])
+  toUserId         String?
+  toUser           User?       @relation("MovDestinoUser", fields: [toUserId], references: [id])
+  previousStatus   String?
+  newStatus        String?
+  // vínculo opcional com solicitação do workflow APROVA
+  requestId        String?
+  request          Request?    @relation(fields: [requestId], references: [id])
+  reason           String?
+  notes            String?
+  createdById      String
+  createdBy        User        @relation("MovCreator", fields: [createdById], references: [id])
+  createdAt        DateTime    @default(now())
+}
+
+model InventoryCount {
+  id           String      @id @default(cuid())
+  // RASCUNHO | EM_ANDAMENTO | CONCLUIDA | CANCELADA
+  status       String      @default("RASCUNHO")
+  // GERAL | TI | ADMINISTRATIVO | SETOR
+  type         String      @default("GERAL")
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  notes        String?
+  createdById  String
+  createdBy    User        @relation("InventoryCountCreator", fields: [createdById], references: [id])
+  completedAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  items InventoryCountItem[]
+}
+
+model InventoryCountItem {
+  id            String         @id @default(cuid())
+  countId       String
+  count         InventoryCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  assetId       String
+  asset         Asset          @relation(fields: [assetId], references: [id])
+  // encontrado na contagem física?
+  found         Boolean?
+  foundLocation String?
+  notes         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([countId, assetId])
 }
