@@ -353,4 +353,55 @@ router.get('/:id/audit', authenticate, async (req: AuthRequest, res: Response) =
   }
 });
 
+// Vincula (ou desvincula) uma unidade física do inventário a uma linha de
+// recurso da solicitação — o cumprimento físico da intenção. A alocação/devolução
+// efetiva do ativo ocorre na conclusão do fluxo (advanceRequest); aqui apenas
+// registra-se a escolha e reserva-se a unidade para evitar dupla reserva.
+router.post('/:id/resources/:resourceId/asset', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { assetId } = req.body as { assetId: string | null };
+    const request = await prisma.request.findUnique({
+      where: { id: req.params.id },
+      include: { flow: { select: { type: true } } },
+    });
+    if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
+
+    // Só ADMIN ou quem tem tarefa nesta solicitação (o responsável pelo atendimento) pode vincular.
+    if (req.user.role !== 'ADMIN') {
+      const hasTask = await prisma.requestTask.count({ where: { requestId: request.id, assigneeId: req.user.id } });
+      if (hasTask === 0) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    }
+
+    const rr = await prisma.requestResource.findFirst({ where: { id: req.params.resourceId, requestId: request.id }, include: { asset: true } });
+    if (!rr) { res.status(404).json({ error: 'Recurso da solicitação não encontrado' }); return; }
+
+    const allocates = request.flow.type === 'ONBOARDING' || request.flow.type === 'PURCHASE';
+
+    // Desvínculo: libera a unidade que estava reservada por esta linha.
+    if (!assetId) {
+      if (rr.assetId && rr.asset?.status === 'RESERVADO') {
+        await prisma.asset.update({ where: { id: rr.assetId }, data: { status: 'DISPONIVEL' } });
+      }
+      const updated = await prisma.requestResource.update({ where: { id: rr.id }, data: { assetId: null } });
+      res.json(updated); return;
+    }
+
+    const asset = await prisma.asset.findUnique({ where: { id: assetId } });
+    if (!asset || !asset.isActive) { res.status(400).json({ error: 'Ativo inválido' }); return; }
+
+    if (allocates) {
+      // Para alocar (admissão/compra), a unidade precisa estar disponível; é reservada.
+      if (asset.status !== 'DISPONIVEL') { res.status(409).json({ error: 'Ativo não está disponível para alocação' }); return; }
+      await prisma.asset.update({ where: { id: assetId }, data: { status: 'RESERVADO' } });
+    }
+    // Para desligamento, vincula-se a unidade em uso, sem alterar o status agora
+    // (a devolução acontece na conclusão do fluxo).
+
+    const updated = await prisma.requestResource.update({ where: { id: rr.id }, data: { assetId } });
+    res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'Erro ao vincular ativo ao recurso' });
+  }
+});
+
 export default router;

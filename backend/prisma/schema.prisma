@@ -242,6 +242,10 @@ model RequestResource {
   quantity       Int          @default(1)
   notes          String?
   status         String       @default("PENDING") // PENDING | ALLOCATED | RETURNED
+  // Ponte com o inventário patrimonial: unidade física que cumpre esta linha de
+  // intenção (quando aplicável). Nula para itens intangíveis (ex.: acessos).
+  assetId        String?
+  asset          Asset?       @relation(fields: [assetId], references: [id])
   createdAt      DateTime     @default(now())
 
   @@unique([requestId, resourceItemId])
@@ -317,8 +321,9 @@ model Asset {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  movements  AssetMovement[]
-  countItems InventoryCountItem[]
+  movements        AssetMovement[]
+  countItems       InventoryCountItem[]
+  requestResources RequestResource[]
 }
 
 model AssetMovement {

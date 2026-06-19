@@ -145,7 +145,11 @@ o que reduz muito o atrito. Passos:
   `20260619140000_add_inventory_assets`), sem bridge. `invoiceValue` migrado para
   `invoiceValueCents` (centavos) e papel `GESTOR` mapeado para `MANAGER`. Inventário
   patrimonial funciona isolado.
-- **Fase 2** — bridge `RequestResource.assetId` + evolução do `advanceRequest`
-  (alocação/devolução físicas dirigidas pelo workflow).
+- **Fase 2** ✅ **concluída** — bridge `RequestResource.assetId` (migration
+  `20260619150000_link_resource_asset`) + evolução do `advanceRequest`: linhas
+  vinculadas a um `Asset` geram `AssetMovement` `ALOCACAO`/`DEVOLUCAO` (com
+  `requestId`) e atualizam `Asset.status` (`ATIVO`/`DISPONIVEL`) na mesma
+  transação. Endpoint `POST /requests/:id/resources/:resourceId/asset` vincula a
+  unidade (reserva em admissão/compra). Itens intangíveis seguem só com status lógico.
 - **Fase 3** — UI de inventário (catálogo, ativos, movimentações, contagem) e a
   seleção de `Asset` na etapa de TI do onboarding.

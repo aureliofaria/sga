@@ -200,9 +200,37 @@ async function applyResourceTransitions(
   if (!target) return;
 
   const transition = async (where: any, scope: string) => {
-    const matches = await db.requestResource.findMany({ where: { ...where, requestId: request.id, status: { not: target } }, select: { id: true } });
+    const matches = await db.requestResource.findMany({
+      where: { ...where, requestId: request.id, status: { not: target } },
+      select: { id: true, assetId: true, asset: { select: { status: true } } },
+    });
     if (matches.length === 0) return;
     await db.requestResource.updateMany({ where: { id: { in: matches.map(m => m.id) } }, data: { status: target } });
+
+    // Ponte com o inventário patrimonial: para as linhas vinculadas a uma unidade
+    // física, reflete a alocação/devolução no Asset e grava o log imutável
+    // (AssetMovement) vinculado à solicitação — na mesma transação.
+    for (const m of matches) {
+      if (!m.assetId) continue;
+      const assetStatus = target === 'ALLOCATED' ? 'ATIVO' : 'DISPONIVEL';
+      const movementType = target === 'ALLOCATED' ? 'ALOCACAO' : 'DEVOLUCAO';
+      await db.asset.update({
+        where: { id: m.assetId },
+        data: target === 'ALLOCATED' ? { status: assetStatus } : { status: assetStatus, userId: null, departmentId: null },
+      });
+      await db.assetMovement.create({
+        data: {
+          assetId: m.assetId,
+          type: movementType,
+          previousStatus: m.asset?.status ?? null,
+          newStatus: assetStatus,
+          requestId: request.id,
+          createdById: request.initiatorId,
+          reason: target === 'ALLOCATED' ? 'Alocação automática pela conclusão do fluxo' : 'Devolução automática pela conclusão do fluxo',
+        },
+      });
+    }
+
     await db.auditLog.create({
       data: {
         requestId: request.id,

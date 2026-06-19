@@ -2,6 +2,14 @@ import prisma from '../src/lib/prisma';
 
 // Limpa todas as tabelas respeitando as dependências de chave estrangeira.
 export async function resetDb() {
+  // Inventário primeiro: AssetMovement.createdById/assetId usam onDelete: RESTRICT,
+  // então precisam sair antes de User/Asset.
+  await prisma.assetMovement.deleteMany();
+  await prisma.inventoryCountItem.deleteMany();
+  await prisma.inventoryCount.deleteMany();
+  await prisma.asset.deleteMany();
+  await prisma.warehouse.deleteMany();
+  await prisma.inventoryItem.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.approval.deleteMany();
