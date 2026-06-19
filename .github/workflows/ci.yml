@@ -5,6 +5,16 @@ on:
     branches: [main]
   pull_request:
 
+# Menor privilégio para o GITHUB_TOKEN: o CI só precisa ler o código.
+permissions:
+  contents: read
+
+# Cancela execuções anteriores ainda em andamento para o mesmo ref ao surgir
+# um novo push (evita gastar runners com commits já superados).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     name: Backend (tests + typecheck)
