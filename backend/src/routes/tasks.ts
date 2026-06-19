@@ -34,12 +34,22 @@ router.post('/batch-complete', authenticate, async (req: AuthRequest, res: Respo
     }
 
     const completed = [];
+    const skipped: { id: string; reason: string }[] = [];
     const requestIds = new Set<string>();
 
     for (const taskId of taskIds) {
       try {
+        const existing = await prisma.requestTask.findUnique({ where: { id: taskId } });
+        if (!existing || existing.assigneeId !== req.user.id) {
+          skipped.push({ id: taskId, reason: 'não atribuída ao usuário' });
+          continue;
+        }
+        if (await attachmentRequirementUnmet(existing.stepId, existing.id, existing.requestId)) {
+          skipped.push({ id: taskId, reason: 'anexo obrigatório ausente' });
+          continue;
+        }
         const task = await prisma.requestTask.update({
-          where: { id: taskId, assigneeId: req.user.id },
+          where: { id: taskId },
           data: { status: 'COMPLETED', completedAt: new Date(), notes },
         });
         await prisma.auditLog.create({
@@ -54,7 +64,7 @@ router.post('/batch-complete', authenticate, async (req: AuthRequest, res: Respo
         requestIds.add(task.requestId);
         completed.push(task);
       } catch {
-        // Skip tasks not found or not owned by user
+        skipped.push({ id: taskId, reason: 'erro ao processar' });
       }
     }
 
@@ -62,7 +72,7 @@ router.post('/batch-complete', authenticate, async (req: AuthRequest, res: Respo
       await advanceRequest(requestId);
     }
 
-    res.json({ completed: completed.length, tasks: completed });
+    res.json({ completed: completed.length, skipped, tasks: completed });
   } catch {
     res.status(500).json({ error: 'Erro ao concluir tarefas em lote' });
   }
@@ -97,6 +107,15 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Verifica se a etapa exige anexo e, em caso afirmativo, se há ao menos um anexo
+// vinculado à tarefa ou à solicitação. Retorna true quando o requisito NÃO foi atendido.
+async function attachmentRequirementUnmet(stepId: string, taskId: string, requestId: string): Promise<boolean> {
+  const step = await prisma.flowStep.findUnique({ where: { id: stepId }, select: { requiresAttachment: true } });
+  if (!step?.requiresAttachment) return false;
+  const count = await prisma.attachment.count({ where: { OR: [{ taskId }, { requestId }] } });
+  return count === 0;
+}
+
 // Garante que a tarefa pertence ao usuário (ou que ele é ADMIN). Retorna a tarefa
 // ou envia a resposta de erro apropriada e devolve null.
 async function loadOwnedTask(req: AuthRequest, res: Response) {
@@ -127,6 +146,9 @@ router.post('/:id/complete', authenticate, async (req: AuthRequest, res: Respons
   try {
     const owned = await loadOwnedTask(req, res);
     if (!owned) return;
+    if (await attachmentRequirementUnmet(owned.stepId, owned.id, owned.requestId)) {
+      res.status(400).json({ error: 'Esta etapa exige pelo menos um anexo antes da conclusão' }); return;
+    }
     const { notes } = req.body;
     const task = await prisma.requestTask.update({
       where: { id: req.params.id },

@@ -1,4 +1,9 @@
+import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
+
+// Aceita tanto o cliente normal quanto um cliente de transação, permitindo que as
+// funções de workflow sejam compostas dentro de uma transação atômica.
+type Db = Prisma.TransactionClient | typeof prisma;
 
 interface BranchCondition {
   field: 'vacancyType' | 'amount' | 'always';
@@ -34,14 +39,14 @@ function evaluateNextOrder(
   return null;
 }
 
-export async function createRequestTasks(requestId: string, flowId: string, stepOrder: number = 0) {
+export async function createRequestTasks(requestId: string, flowId: string, stepOrder: number = 0, db: Db = prisma) {
   const [flow, resources, request] = await Promise.all([
-    prisma.flowTemplate.findUnique({
+    db.flowTemplate.findUnique({
       where: { id: flowId },
       include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } },
     }),
-    prisma.requestResource.findMany({ where: { requestId }, include: { resourceItem: true } }),
-    prisma.request.findUnique({ where: { id: requestId } }),
+    db.requestResource.findMany({ where: { requestId }, include: { resourceItem: true } }),
+    db.request.findUnique({ where: { id: requestId } }),
   ]);
 
   if (!flow || !request) throw new Error('Fluxo ou solicitação não encontrado');
@@ -60,20 +65,20 @@ export async function createRequestTasks(requestId: string, flowId: string, step
 
     let assignees: { id: string; name: string }[] = [];
     if (step.requiredRole) {
-      assignees = await prisma.user.findMany({
-        where: { role: step.requiredRole, isActive: true },
+      assignees = await db.user.findMany({
+        where: { role: step.requiredRole, isActive: true, id: { not: request.initiatorId } },
         select: { id: true, name: true },
       });
     }
     if (assignees.length === 0) {
-      const initiator = await prisma.user.findUnique({ where: { id: request.initiatorId }, select: { id: true, name: true } });
+      const initiator = await db.user.findUnique({ where: { id: request.initiatorId }, select: { id: true, name: true } });
       if (initiator) assignees = [initiator];
     }
 
     const dueDate = step.deadlineHours ? new Date(Date.now() + step.deadlineHours * 60 * 60 * 1000) : null;
 
     for (const assignee of assignees) {
-      await prisma.requestTask.create({
+      await db.requestTask.create({
         data: {
           requestId,
           stepId: step.id,
@@ -88,7 +93,7 @@ export async function createRequestTasks(requestId: string, flowId: string, step
     }
   }
 
-  await prisma.auditLog.create({
+  await db.auditLog.create({
     data: {
       requestId,
       userId: request.initiatorId,
@@ -168,52 +173,65 @@ export async function processSlaExpiries(): Promise<number> {
   return expiredTasks.length;
 }
 
+// Avança a solicitação para a próxima etapa (ou conclui) de forma atômica.
+// Toda a leitura de completude e a mutação correm dentro de uma única transação,
+// e a atualização usa o currentStep atual como guarda otimista — se outra
+// execução concorrente já avançou a etapa, esta sai sem efeito (evita avanço/
+// duplicação de tarefas em cliques simultâneos).
 export async function advanceRequest(requestId: string) {
-  const request = await prisma.request.findUnique({
-    where: { id: requestId },
-    include: { flow: { include: { steps: { orderBy: { order: 'asc' } } } } },
-  });
-  if (!request) throw new Error('Solicitação não encontrada');
-
-  const complete = await isStepComplete(requestId, request.currentStep);
-  if (!complete) return;
-
-  // Determine next order via branching conditions or sequential default
-  const currentSteps = request.flow.steps.filter(s => s.order === request.currentStep);
-  const conditionNextOrder = evaluateNextOrder(currentSteps, request);
-
-  let nextStepOrder: number | null = conditionNextOrder;
-  if (nextStepOrder === null) {
-    const allOrders = [...new Set(request.flow.steps.map(s => s.order))].sort((a, b) => a - b);
-    const currentIdx = allOrders.indexOf(request.currentStep);
-    nextStepOrder = currentIdx < allOrders.length - 1 ? allOrders[currentIdx + 1] : null;
-  }
-
-  const hasNextStep = nextStepOrder !== null && request.flow.steps.some(s => s.order === nextStepOrder);
-
-  if (hasNextStep) {
-    await prisma.request.update({
+  await prisma.$transaction(async (tx) => {
+    const request = await tx.request.findUnique({
       where: { id: requestId },
-      data: { currentStep: nextStepOrder!, status: 'IN_PROGRESS' },
+      include: { flow: { include: { steps: { orderBy: { order: 'asc' } } } } },
     });
-    await createRequestTasks(requestId, request.flowId, nextStepOrder!);
-  } else {
-    await prisma.request.update({ where: { id: requestId }, data: { status: 'COMPLETED' } });
-    await prisma.auditLog.create({
-      data: {
-        requestId,
-        userId: request.initiatorId,
-        userName: 'Sistema',
-        action: 'COMPLETED',
-        details: 'Solicitação concluída com sucesso',
-      },
-    });
-  }
+    if (!request) return;
+    if (['COMPLETED', 'REJECTED', 'CANCELLED'].includes(request.status)) return;
+
+    const complete = await isStepComplete(requestId, request.currentStep, tx);
+    if (!complete) return;
+
+    // Determine next order via branching conditions or sequential default
+    const currentSteps = request.flow.steps.filter(s => s.order === request.currentStep);
+    const conditionNextOrder = evaluateNextOrder(currentSteps, request);
+
+    let nextStepOrder: number | null = conditionNextOrder;
+    if (nextStepOrder === null) {
+      const allOrders = [...new Set(request.flow.steps.map(s => s.order))].sort((a, b) => a - b);
+      const currentIdx = allOrders.indexOf(request.currentStep);
+      nextStepOrder = currentIdx < allOrders.length - 1 ? allOrders[currentIdx + 1] : null;
+    }
+
+    const hasNextStep = nextStepOrder !== null && request.flow.steps.some(s => s.order === nextStepOrder);
+
+    if (hasNextStep) {
+      const upd = await tx.request.updateMany({
+        where: { id: requestId, currentStep: request.currentStep },
+        data: { currentStep: nextStepOrder!, status: 'IN_PROGRESS' },
+      });
+      if (upd.count === 0) return; // outra execução já avançou esta etapa
+      await createRequestTasks(requestId, request.flowId, nextStepOrder!, tx);
+    } else {
+      const upd = await tx.request.updateMany({
+        where: { id: requestId, currentStep: request.currentStep, status: { notIn: ['COMPLETED', 'REJECTED', 'CANCELLED'] } },
+        data: { status: 'COMPLETED' },
+      });
+      if (upd.count === 0) return;
+      await tx.auditLog.create({
+        data: {
+          requestId,
+          userId: request.initiatorId,
+          userName: 'Sistema',
+          action: 'COMPLETED',
+          details: 'Solicitação concluída com sucesso',
+        },
+      });
+    }
+  });
 }
 
-export async function isStepComplete(requestId: string, stepOrder: number): Promise<boolean> {
+export async function isStepComplete(requestId: string, stepOrder: number, db: Db = prisma): Promise<boolean> {
   const [request, resources] = await Promise.all([
-    prisma.request.findUnique({
+    db.request.findUnique({
       where: { id: requestId },
       include: {
         flow: { include: { steps: { where: { order: stepOrder }, include: { authLevels: true } } } },
@@ -221,7 +239,7 @@ export async function isStepComplete(requestId: string, stepOrder: number): Prom
         approvals: { where: { stepOrder } },
       },
     }),
-    prisma.requestResource.findMany({ where: { requestId }, include: { resourceItem: true } }),
+    db.requestResource.findMany({ where: { requestId }, include: { resourceItem: true } }),
   ]);
 
   if (!request) return false;
