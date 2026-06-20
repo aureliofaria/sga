@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog, ResourceItem, InventoryItem, Asset, AssetMovement, Warehouse, DashboardReport } from '../types';
+import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog, ResourceItem, InventoryItem, Asset, AssetMovement, Warehouse, DashboardReport, Comment } from '../types';
 
 const api = axios.create({
   baseURL: 'http://localhost:3001/api',
@@ -118,6 +118,10 @@ export const requestsApi = {
   // Vincula/desvincula uma unidade física do inventário a uma linha de recurso.
   linkAsset: (id: string, resourceId: string, assetId: string | null) =>
     api.post(`/requests/${id}/resources/${resourceId}/asset`, { assetId }).then((r) => r.data),
+  // Comentários por etapa
+  getComments: (id: string) => api.get<Comment[]>(`/requests/${id}/comments`).then((r) => r.data),
+  addComment: (id: string, body: string, stepOrder?: number | null) =>
+    api.post<Comment>(`/requests/${id}/comments`, { body, stepOrder }).then((r) => r.data),
 };
 
 // Tasks

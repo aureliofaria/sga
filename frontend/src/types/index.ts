@@ -128,6 +128,16 @@ export interface Asset {
   movements?: AssetMovement[];
 }
 
+export interface Comment {
+  id: string;
+  requestId: string;
+  stepOrder?: number | null;
+  authorId: string;
+  author?: { id: string; name: string };
+  body: string;
+  createdAt: string;
+}
+
 export interface DashboardReport {
   range: { from: string; to: string };
   totals: { requests: number; open: number; completed: number; rejected: number };

@@ -79,6 +79,53 @@ function ResourceRow({ requestId, requestType, resource }: { requestId: string; 
   );
 }
 
+// Comentários por etapa — colaboração entre os envolvidos na solicitação.
+function CommentsTab({ requestId }: { requestId: string }) {
+  const qc = useQueryClient();
+  const [text, setText] = useState('');
+  const { data: comments = [], isLoading } = useQuery({
+    queryKey: ['comments', requestId],
+    queryFn: () => requestsApi.getComments(requestId),
+  });
+  const add = useMutation({
+    mutationFn: () => requestsApi.addComment(requestId, text.trim()),
+    onSuccess: () => { setText(''); qc.invalidateQueries({ queryKey: ['comments', requestId] }); qc.invalidateQueries({ queryKey: ['request', requestId] }); },
+    onError: () => toast.error('Erro ao comentar'),
+  });
+
+  return (
+    <div>
+      <div className="space-y-3 mb-4">
+        {isLoading && <p className="text-sm text-gray-400 text-center py-4">Carregando…</p>}
+        {!isLoading && comments.length === 0 && <p className="text-sm text-gray-500 text-center py-4">Nenhum comentário ainda.</p>}
+        {comments.map((c) => (
+          <div key={c.id} className="flex gap-3">
+            <div className="w-8 h-8 rounded-full bg-golplus-blue-100 text-golplus-blue-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
+              {c.author?.name?.charAt(0)?.toUpperCase()}
+            </div>
+            <div className="flex-1">
+              <p className="text-sm"><span className="font-medium text-gray-900">{c.author?.name}</span> <span className="text-xs text-gray-400">{format(new Date(c.createdAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</span></p>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{c.body}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && text.trim()) add.mutate(); }}
+          placeholder="Escreva um comentário…"
+          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
+        />
+        <button onClick={() => text.trim() && add.mutate()} disabled={add.isPending || !text.trim()} className="px-4 py-2 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50">
+          {add.isPending ? '...' : 'Enviar'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ActionModal({ title, onConfirm, onClose, action }: { title: string; onConfirm: (comments: string) => void; onClose: () => void; action: 'approve' | 'reject' }) {
   const [comments, setComments] = useState('');
   return (
@@ -111,7 +158,7 @@ export default function RequestDetail() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'details' | 'tasks' | 'approvals' | 'attachments' | 'audit'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'tasks' | 'approvals' | 'attachments' | 'comments' | 'audit'>('details');
   const [modal, setModal] = useState<'approve' | 'reject' | null>(null);
 
   const { data: request, isLoading } = useQuery({
@@ -158,6 +205,7 @@ export default function RequestDetail() {
     { id: 'tasks', label: `Tarefas (${request.tasks?.length || 0})` },
     { id: 'approvals', label: `Aprovações (${request.approvals?.length || 0})` },
     { id: 'attachments', label: `Anexos (${request.attachments?.length || 0})` },
+    { id: 'comments', label: 'Comentários' },
     { id: 'audit', label: 'Histórico' },
   ] as const;
 
@@ -339,6 +387,8 @@ export default function RequestDetail() {
               )}
             </div>
           )}
+
+          {activeTab === 'comments' && <CommentsTab requestId={request.id} />}
 
           {activeTab === 'audit' && (
             <div className="space-y-3">

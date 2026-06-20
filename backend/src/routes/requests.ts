@@ -249,6 +249,10 @@ router.post('/:id/approve', authenticate, async (req: AuthRequest, res: Response
 router.post('/:id/reject', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { comments } = req.body;
+    // Rejeição exige motivo (rastreabilidade — toda recusa fica justificada).
+    if (!comments || !String(comments).trim()) {
+      res.status(400).json({ error: 'O motivo da rejeição é obrigatório' }); return;
+    }
     const request = await prisma.request.findUnique({
       where: { id: req.params.id },
       include: { flow: { include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } } } },
@@ -401,6 +405,76 @@ router.post('/:id/resources/:resourceId/asset', authenticate, async (req: AuthRe
     res.json(updated);
   } catch {
     res.status(500).json({ error: 'Erro ao vincular ativo ao recurso' });
+  }
+});
+
+// ===== Comentários por etapa =====
+// Carrega quem está envolvido na solicitação para o controle de acesso.
+async function loadInvolvement(requestId: string) {
+  return prisma.request.findUnique({
+    where: { id: requestId },
+    select: {
+      id: true,
+      title: true,
+      initiatorId: true,
+      tasks: { select: { assigneeId: true } },
+      approvals: { select: { approverId: true } },
+    },
+  });
+}
+
+function canAccessComments(user: AuthRequest['user'], inv: NonNullable<Awaited<ReturnType<typeof loadInvolvement>>>): boolean {
+  if (user.role === 'ADMIN') return true;
+  return (
+    inv.initiatorId === user.id ||
+    inv.tasks.some((t) => t.assigneeId === user.id) ||
+    inv.approvals.some((a) => a.approverId === user.id)
+  );
+}
+
+router.get('/:id/comments', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const inv = await loadInvolvement(req.params.id);
+    if (!inv) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
+    if (!canAccessComments(req.user, inv)) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    const comments = await prisma.comment.findMany({
+      where: { requestId: req.params.id },
+      include: { author: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json(comments);
+  } catch {
+    res.status(500).json({ error: 'Erro ao buscar comentários' });
+  }
+});
+
+router.post('/:id/comments', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { body, stepOrder } = req.body as { body?: string; stepOrder?: number | null };
+    if (!body || !body.trim()) { res.status(400).json({ error: 'O comentário não pode ser vazio' }); return; }
+    const inv = await loadInvolvement(req.params.id);
+    if (!inv) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
+    if (!canAccessComments(req.user, inv)) { res.status(403).json({ error: 'Acesso negado' }); return; }
+
+    const comment = await prisma.$transaction(async (tx) => {
+      const created = await tx.comment.create({
+        data: { requestId: req.params.id, stepOrder: stepOrder ?? null, authorId: req.user.id, body: body.trim() },
+        include: { author: { select: { id: true, name: true } } },
+      });
+      await tx.auditLog.create({
+        data: {
+          requestId: req.params.id,
+          userId: req.user.id,
+          userName: req.user.name,
+          action: 'COMMENT_ADDED',
+          details: stepOrder != null ? `Comentário na etapa ${stepOrder}` : 'Comentário geral',
+        },
+      });
+      return created;
+    });
+    res.status(201).json(comment);
+  } catch {
+    res.status(500).json({ error: 'Erro ao adicionar comentário' });
   }
 });
 
