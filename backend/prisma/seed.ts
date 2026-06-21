@@ -15,26 +15,39 @@ async function main() {
 
   console.log('Departamentos criados');
 
+  const isProd = process.env.NODE_ENV === 'production';
+
+  // Administrador inicial: em produção vem de variáveis de ambiente (sem
+  // credencial padrão); em desenvolvimento usa admin@sga.com / senha123.
+  if (isProd && (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD)) {
+    throw new Error('Em produção, defina ADMIN_EMAIL e ADMIN_PASSWORD para criar o administrador inicial.');
+  }
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@sga.com';
+  const adminPassword = process.env.ADMIN_PASSWORD || 'senha123';
+  const admin = await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: {},
+    create: { name: 'Administrador', email: adminEmail, passwordHash: await bcrypt.hash(adminPassword, 10), role: 'ADMIN' },
+  });
+
+  // Usuários de DEMONSTRAÇÃO — nunca criados em produção (senha padrão).
   const hash = await bcrypt.hash('senha123', 10);
-
-  // Users
-  const admin = await prisma.user.create({
-    data: { name: 'Administrador SGA', email: 'admin@sga.com', passwordHash: hash, role: 'ADMIN' },
-  });
-  const anaRH = await prisma.user.create({
-    data: { name: 'Ana Silva', email: 'rh@sga.com', passwordHash: hash, role: 'HR', departmentId: rh.id },
-  });
-  const carlosFinanceiro = await prisma.user.create({
-    data: { name: 'Carlos Souza', email: 'financeiro@sga.com', passwordHash: hash, role: 'FINANCE', departmentId: financeiro.id },
-  });
-  const robertoGestor = await prisma.user.create({
-    data: { name: 'Roberto Lima', email: 'gestor@sga.com', passwordHash: hash, role: 'MANAGER', departmentId: comercial.id },
-  });
-  const joao = await prisma.user.create({
-    data: { name: 'João Santos', email: 'joao@sga.com', passwordHash: hash, role: 'USER', departmentId: ti.id },
-  });
-
-  console.log('Usuários criados');
+  let anaRH: any, carlosFinanceiro: any, robertoGestor: any, joao: any;
+  if (!isProd) {
+    anaRH = await prisma.user.create({
+      data: { name: 'Ana Silva', email: 'rh@sga.com', passwordHash: hash, role: 'HR', departmentId: rh.id },
+    });
+    carlosFinanceiro = await prisma.user.create({
+      data: { name: 'Carlos Souza', email: 'financeiro@sga.com', passwordHash: hash, role: 'FINANCE', departmentId: financeiro.id },
+    });
+    robertoGestor = await prisma.user.create({
+      data: { name: 'Roberto Lima', email: 'gestor@sga.com', passwordHash: hash, role: 'MANAGER', departmentId: comercial.id },
+    });
+    joao = await prisma.user.create({
+      data: { name: 'João Santos', email: 'joao@sga.com', passwordHash: hash, role: 'USER', departmentId: ti.id },
+    });
+    console.log('Usuários de demonstração criados');
+  }
 
   // Catálogo de inventário (recursos alocáveis em admissões / devolvidos em desligamentos)
   const notebook = await prisma.resourceItem.create({ data: { name: 'Notebook Dell Latitude', type: 'EQUIPMENT', sortOrder: 1 } });
@@ -209,7 +222,8 @@ async function main() {
 
   console.log('Fluxos criados');
 
-  // Sample requests
+  // Solicitações de DEMONSTRAÇÃO — nunca criadas em produção.
+  if (!isProd) {
   // 1. Completed onboarding request
   const onboardingRequest = await prisma.request.create({
     data: {
@@ -302,6 +316,7 @@ async function main() {
   });
 
   console.log('Solicitações de exemplo criadas');
+  } // fim do bloco de demonstração
 
   // Inventário patrimonial: almoxarifado padrão + catálogo inicial (TI e Administrativo)
   const almoxarifado = await prisma.warehouse.create({
@@ -326,12 +341,13 @@ async function main() {
   console.log('Inventário patrimonial criado (almoxarifado + catálogo + ativo de exemplo)');
 
   console.log('\nSeed concluído com sucesso!');
-  console.log('\nUsuários de demonstração:');
-  console.log('  admin@sga.com    (ADMIN)   - senha: senha123');
-  console.log('  rh@sga.com       (HR)      - senha: senha123');
-  console.log('  financeiro@sga.com (FINANCE) - senha: senha123');
-  console.log('  gestor@sga.com   (MANAGER) - senha: senha123');
-  console.log('  joao@sga.com     (USER)    - senha: senha123');
+  if (isProd) {
+    console.log(`Administrador: ${adminEmail} (senha definida via ADMIN_PASSWORD).`);
+    console.log('Nenhum usuário/solicitação de demonstração criado (produção).');
+  } else {
+    console.log('\nUsuários de demonstração (senha: senha123):');
+    console.log('  admin@sga.com · rh@sga.com · financeiro@sga.com · gestor@sga.com · joao@sga.com');
+  }
 }
 
 main()

@@ -10,7 +10,8 @@
     "db:generate": "prisma generate",
     "db:seed": "ts-node prisma/seed.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "node scripts/e2e.mjs"
   },
   "dependencies": {
     "@prisma/client": "^5.13.0",

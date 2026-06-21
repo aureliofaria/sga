@@ -49,22 +49,39 @@ NOTIFICATIONS_EXTERNAL_ENABLED=false
 npm install                                   # instala backend + frontend (workspaces)
 npm run db:generate --workspace=backend       # gera o Prisma Client
 npm run db:deploy  --workspace=backend         # aplica as migrations (cria o dev.db)
-npm run db:seed    --workspace=backend         # OPCIONAL: dados de demonstração
+
+# Seed inicial de PRODUÇÃO: cria os fluxos + catálogo de inventário e UM
+# administrador a partir das variáveis de ambiente. NÃO cria usuários nem
+# solicitações de demonstração quando NODE_ENV=production.
+NODE_ENV=production ADMIN_EMAIL="voce@empresa.com" ADMIN_PASSWORD="<senha forte>" \
+  npm run db:seed --workspace=backend
 
 npm run build --workspace=frontend            # gera frontend/dist
 npm run build --workspace=backend             # gera backend/dist
 ```
 > Se o script `db:deploy` não existir, use: `npx prisma migrate deploy --schema backend/prisma/schema.prisma`.
 
-> ⚠️ **Rode o seed só na primeira vez** (ou nunca, em produção real) — ele cria
-> usuários de demonstração com senha padrão. **Troque as senhas** ou crie os
-> usuários reais e desative os de demonstração.
+> ⚠️ **Rode o seed só na primeira vez.** Em produção (`NODE_ENV=production`) ele
+> **exige** `ADMIN_EMAIL` e `ADMIN_PASSWORD` e **não** cria contas de demonstração.
+> Sem `NODE_ENV=production`, o seed cria usuários de demonstração com senha
+> padrão (`senha123`) — **apenas para testes locais, nunca em produção.**
 
 ## 5. Subir a aplicação
 ```bash
 npm start --workspace=backend     # equivale a: node dist/index.js (lê backend/.env)
 ```
 Acesse de qualquer PC da rede: **`http://<ip-do-servidor>:3001`**
+
+### Validação pós-deploy (smoke E2E)
+Com o servidor no ar, valide os fluxos críticos de ponta a ponta. **Requer um
+banco com dados de demonstração** (rode o seed SEM `NODE_ENV=production` num
+ambiente de homologação) — não rode contra o banco de produção:
+```bash
+BASE=http://<ip>:3001 npm run test:e2e --workspace=backend
+```
+Esperado: **35 verificações, 0 falhas** (login multi-papel, criação, alçada,
+segregação, anexo obrigatório, admissão→alocação de ativo, notificações,
+auditoria/Excel, relatórios, RBAC, frontend servido).
 
 ### Manter no ar (systemd — Linux)
 `/etc/systemd/system/aprova.service`:
@@ -132,7 +149,11 @@ sudo systemctl restart aprova
 
 ## 10. Checklist de segurança (antes de liberar para a equipe)
 - [ ] `JWT_SECRET` forte e único (`openssl rand -hex 32`).
-- [ ] Senhas de demonstração trocadas / usuários reais criados.
+- [ ] Seed rodado com `NODE_ENV=production` + `ADMIN_EMAIL`/`ADMIN_PASSWORD`
+      (sem contas de demonstração no banco de produção).
+- [ ] Confirmar que **não** existem usuários `@sga.com` com senha `senha123`
+      no banco de produção.
+- [ ] Demais usuários reais criados pelo admin na tela de Usuários.
 - [ ] Firewall liberando só a porta da aplicação na LAN.
 - [ ] Rotina de backup do `dev.db` + `uploads/` agendada.
 - [ ] (Recomendado) HTTPS via proxy reverso.
