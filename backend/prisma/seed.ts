@@ -18,11 +18,11 @@ async function main() {
   const isProd = process.env.NODE_ENV === 'production';
 
   // Administrador inicial: em produção vem de variáveis de ambiente (sem
-  // credencial padrão); em desenvolvimento usa admin@sga.com / senha123.
+  // credencial padrão); em desenvolvimento usa admin@aprova.com / senha123.
   if (isProd && (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD)) {
     throw new Error('Em produção, defina ADMIN_EMAIL e ADMIN_PASSWORD para criar o administrador inicial.');
   }
-  const adminEmail = process.env.ADMIN_EMAIL || 'admin@sga.com';
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@aprova.com';
   const adminPassword = process.env.ADMIN_PASSWORD || 'senha123';
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
@@ -35,16 +35,16 @@ async function main() {
   let anaRH: any, carlosFinanceiro: any, robertoGestor: any, joao: any;
   if (!isProd) {
     anaRH = await prisma.user.create({
-      data: { name: 'Ana Silva', email: 'rh@sga.com', passwordHash: hash, role: 'HR', departmentId: rh.id },
+      data: { name: 'Ana Silva', email: 'rh@aprova.com', passwordHash: hash, role: 'HR', departmentId: rh.id },
     });
     carlosFinanceiro = await prisma.user.create({
-      data: { name: 'Carlos Souza', email: 'financeiro@sga.com', passwordHash: hash, role: 'FINANCE', departmentId: financeiro.id },
+      data: { name: 'Carlos Souza', email: 'financeiro@aprova.com', passwordHash: hash, role: 'FINANCE', departmentId: financeiro.id },
     });
     robertoGestor = await prisma.user.create({
-      data: { name: 'Roberto Lima', email: 'gestor@sga.com', passwordHash: hash, role: 'MANAGER', departmentId: comercial.id },
+      data: { name: 'Roberto Lima', email: 'gestor@aprova.com', passwordHash: hash, role: 'MANAGER', departmentId: comercial.id },
     });
     joao = await prisma.user.create({
-      data: { name: 'João Santos', email: 'joao@sga.com', passwordHash: hash, role: 'USER', departmentId: ti.id },
+      data: { name: 'João Santos', email: 'joao@aprova.com', passwordHash: hash, role: 'USER', departmentId: ti.id },
     });
     console.log('Usuários de demonstração criados');
   }
@@ -346,7 +346,7 @@ async function main() {
     console.log('Nenhum usuário/solicitação de demonstração criado (produção).');
   } else {
     console.log('\nUsuários de demonstração (senha: senha123):');
-    console.log('  admin@sga.com · rh@sga.com · financeiro@sga.com · gestor@sga.com · joao@sga.com');
+    console.log('  admin@aprova.com · rh@aprova.com · financeiro@aprova.com · gestor@aprova.com · joao@aprova.com');
   }
 }
 

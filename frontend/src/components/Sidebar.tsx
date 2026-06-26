@@ -32,7 +32,7 @@ export default function Sidebar() {
       {/* Brand */}
       <div className="px-5 py-5 border-b border-white/10">
         <Logo variant="white" />
-        <div className="text-golplus-blue-100 text-xs mt-2">Gestão de Aprovações e Fluxos</div>
+        <div className="text-golplus-blue-100 text-xs mt-2">Aprovações e fluxos de trabalho</div>
       </div>
 
       {/* Navigation */}

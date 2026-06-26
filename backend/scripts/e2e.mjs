@@ -24,17 +24,17 @@ async function login(email) {
 
 async function main() {
   // 1) Autenticação de todos os papéis
-  const admin = await login('admin@sga.com');
-  const gestor = await login('gestor@sga.com');
-  const fin = await login('financeiro@sga.com');
-  const joao = await login('joao@sga.com');
-  const rh = await login('rh@sga.com');
+  const admin = await login('admin@aprova.com');
+  const gestor = await login('gestor@aprova.com');
+  const fin = await login('financeiro@aprova.com');
+  const joao = await login('joao@aprova.com');
+  const rh = await login('rh@aprova.com');
   check('login admin', !!admin);
   check('login gestor', !!gestor);
   check('login financeiro', !!fin);
   check('login joao (USER)', !!joao);
   check('login rh', !!rh);
-  check('login com senha errada falha', (await api('POST', '/api/auth/login', null, { email: 'admin@sga.com', password: 'x' })).status === 401);
+  check('login com senha errada falha', (await api('POST', '/api/auth/login', null, { email: 'admin@aprova.com', password: 'x' })).status === 401);
 
   // 2) Fluxos disponíveis
   const flows = (await api('GET', '/api/flows', admin)).data || [];

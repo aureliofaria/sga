@@ -36,11 +36,11 @@ mesma rede podem acessar pelo IP do notebook:
 --------------------------------------------------------
   USUÁRIOS DE DEMONSTRAÇÃO (senha: senha123)
 --------------------------------------------------------
-  admin@sga.com ........ Administrador (usuários, auditoria, relatórios)
-  joao@sga.com ......... Usuário comum (abre solicitações)
-  gestor@sga.com ....... Gestor (aprova / alçada por valor)
-  financeiro@sga.com ... Financeiro
-  rh@sga.com ........... RH (admissão / desligamento / inventário)
+  admin@aprova.com ........ Administrador (usuários, auditoria, relatórios)
+  joao@aprova.com ......... Usuário comum (abre solicitações)
+  gestor@aprova.com ....... Gestor (aprova / alçada por valor)
+  financeiro@aprova.com ... Financeiro
+  rh@aprova.com ........... RH (admissão / desligamento / inventário)
 
 ATENÇÃO: estes são dados de DEMONSTRAÇÃO, para testes e apresentação.
 Para uso real (produção), siga o arquivo DEPLOY.md (cria um único

@@ -25,7 +25,7 @@ CORS. Banco em **SQLite** (arquivo no disco), suficiente para uso interno.
 
 ## 2. Obter o código
 ```bash
-git clone <url-do-repo> sga && cd sga
+git clone <url-do-repo> aprova && cd aprova
 # ou copie a pasta do projeto para o servidor
 ```
 
@@ -92,9 +92,9 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/caminho/para/sga/backend
+WorkingDirectory=/caminho/para/aprova/backend
 ExecStart=/usr/bin/node dist/index.js
-EnvironmentFile=/caminho/para/sga/backend/.env
+EnvironmentFile=/caminho/para/aprova/backend/.env
 Restart=always
 User=aprova
 # Para usar a porta 80 sem rodar como root, descomente:
@@ -151,7 +151,7 @@ sudo systemctl restart aprova
 - [ ] `JWT_SECRET` forte e único (`openssl rand -hex 32`).
 - [ ] Seed rodado com `NODE_ENV=production` + `ADMIN_EMAIL`/`ADMIN_PASSWORD`
       (sem contas de demonstração no banco de produção).
-- [ ] Confirmar que **não** existem usuários `@sga.com` com senha `senha123`
+- [ ] Confirmar que **não** existem usuários `@aprova.com` com senha `senha123`
       no banco de produção.
 - [ ] Demais usuários reais criados pelo admin na tela de Usuários.
 - [ ] Firewall liberando só a porta da aplicação na LAN.
