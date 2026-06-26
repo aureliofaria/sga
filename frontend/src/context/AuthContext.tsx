@@ -26,17 +26,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const storedToken = localStorage.getItem('sga_token');
-    const storedUser = localStorage.getItem('sga_user');
+    const storedToken = localStorage.getItem('aprova_token');
+    const storedUser = localStorage.getItem('aprova_user');
     if (storedToken && storedUser) {
       setToken(storedToken);
       setUser(JSON.parse(storedUser));
       authApi.me().then((u) => {
         setUser(u);
-        localStorage.setItem('sga_user', JSON.stringify(u));
+        localStorage.setItem('aprova_user', JSON.stringify(u));
       }).catch(() => {
-        localStorage.removeItem('sga_token');
-        localStorage.removeItem('sga_user');
+        localStorage.removeItem('aprova_token');
+        localStorage.removeItem('aprova_user');
         setToken(null);
         setUser(null);
       }).finally(() => setIsLoading(false));
@@ -49,15 +49,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const data = await authApi.login(email, password);
     setToken(data.token);
     setUser(data.user);
-    localStorage.setItem('sga_token', data.token);
-    localStorage.setItem('sga_user', JSON.stringify(data.user));
+    localStorage.setItem('aprova_token', data.token);
+    localStorage.setItem('aprova_user', JSON.stringify(data.user));
   };
 
   const logout = () => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem('sga_token');
-    localStorage.removeItem('sga_user');
+    localStorage.removeItem('aprova_token');
+    localStorage.removeItem('aprova_user');
     window.location.href = '/login';
   };
 

@@ -8,3 +8,6 @@ uploads/
 
 # test artifacts
 backend/prisma/schema.test.prisma
+
+# Worktrees de agentes (não versionar)
+.claude/worktrees/
