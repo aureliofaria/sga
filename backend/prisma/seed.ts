@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { SECTORS } from '../src/lib/org';
 
 const prisma = new PrismaClient();
 
@@ -14,6 +15,14 @@ async function main() {
   const operacoes = await prisma.department.create({ data: { name: 'Operações' } });
 
   console.log('Departamentos criados');
+
+  // Setores da empresa (Fase 0 — Organização & Acessos). Idempotente e SEMPRE
+  // executado (inclusive em produção): setor é configuração, não dado de demo.
+  for (const name of SECTORS) {
+    const exists = await prisma.sector.findFirst({ where: { name } });
+    if (!exists) await prisma.sector.create({ data: { name } });
+  }
+  console.log(`Setores garantidos (${SECTORS.length})`);
 
   const isProd = process.env.NODE_ENV === 'production';
 

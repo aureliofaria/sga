@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import prisma from '../lib/prisma';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { serializeUser, normalizeRequestPermissions } from '../lib/users';
+import { isValidRole } from '../lib/org';
 
 const router = Router();
 
@@ -38,6 +39,7 @@ router.post('/', authenticate, requireRole('ADMIN'), async (req: AuthRequest, re
       res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
       return;
     }
+    if (role && !isValidRole(role)) { res.status(400).json({ error: 'Papel inválido' }); return; }
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) { res.status(409).json({ error: 'Email já cadastrado' }); return; }
     const passwordHash = await bcrypt.hash(password, 10);
@@ -62,6 +64,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     const isAdmin = req.user.role === 'ADMIN';
     if (!isSelf && !isAdmin) { res.status(403).json({ error: 'Acesso negado' }); return; }
     const { name, email, role, departmentId, isActive, password, requestPermissions } = req.body;
+    if (role && !isValidRole(role)) { res.status(400).json({ error: 'Papel inválido' }); return; }
     const data: any = {};
     if (name) data.name = name;
     if (email) data.email = email;
