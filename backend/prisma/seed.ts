@@ -56,6 +56,27 @@ async function main() {
       data: { name: 'João Santos', email: 'joao@aprova.com', passwordHash: hash, role: 'USER', departmentId: ti.id },
     });
     console.log('Usuários de demonstração criados');
+
+    // Hierarquia de setor (Fase 0 · Passo 3) — torna a visibilidade por
+    // setor/hierarquia demonstrável com os usuários de demonstração.
+    //  • Roberto (gestor) é Líder I do setor "TI, Dados e Infra": vê TODOS os
+    //    pedidos do setor (incluindo os de João).
+    //  • Ana (RH) é Líder II do mesmo setor: vê os próprios e os de seus Membros.
+    //  • João é Membro reportando à Ana: vê apenas os próprios pedidos.
+    // Carlos (financeiro) fica sem filiação: comporta-se como Membro (só os seus).
+    const setorTI = await prisma.sector.findFirst({ where: { name: 'TI, Dados e Infra' } });
+    if (setorTI) {
+      const lider1 = await prisma.sectorMember.create({
+        data: { sectorId: setorTI.id, userId: robertoGestor.id, role: 'LIDER', level: 'LIDER_1' },
+      });
+      const lider2 = await prisma.sectorMember.create({
+        data: { sectorId: setorTI.id, userId: anaRH.id, role: 'LIDER', level: 'LIDER_2', reportsToId: lider1.id },
+      });
+      await prisma.sectorMember.create({
+        data: { sectorId: setorTI.id, userId: joao.id, role: 'PROTETOR', level: 'MEMBRO', reportsToId: lider2.id },
+      });
+      console.log('Hierarquia de setor de demonstração criada (Líder I/II/Membro em TI, Dados e Infra)');
+    }
   }
 
   // Catálogo de inventário (recursos alocáveis em admissões / devolvidos em desligamentos)

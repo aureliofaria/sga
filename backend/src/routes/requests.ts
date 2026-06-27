@@ -7,35 +7,18 @@ import { canOpenRequestType } from '../lib/users';
 import { APPROVER_ROLES } from '../config';
 import { notify, notifyMany } from '../services/notifications';
 import { parseCents } from '../lib/money';
+import { buildRequestWhere, canViewRequest } from '../lib/visibility';
 
 const router = Router();
-
-// Papéis com visão ampla (espelha o filtro da listagem): além do ADMIN, gestão,
-// financeiro e RH enxergam qualquer solicitação. Os demais só veem as que lhes
-// dizem respeito (iniciador, responsável por tarefa ou aprovador) — fecha o IDOR
-// de leitura/escrita em /:id, /:id/attachments, /:id/audit.
-const PRIVILEGED_VIEW_ROLES = ['ADMIN', 'MANAGER', 'FINANCE', 'HR'];
-function isInvolved(
-  user: AuthRequest['user'],
-  inv: { initiatorId: string; tasks: { assigneeId: string | null }[]; approvals: { approverId: string }[] },
-): boolean {
-  if (PRIVILEGED_VIEW_ROLES.includes(user.role)) return true;
-  return (
-    inv.initiatorId === user.id ||
-    inv.tasks.some((t) => t.assigneeId === user.id) ||
-    inv.approvals.some((a) => a.approverId === user.id)
-  );
-}
 
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { status, type, search } = req.query as any;
     const user = req.user;
-    const where: any = {};
-
-    if (user.role !== 'ADMIN' && user.role !== 'MANAGER' && user.role !== 'FINANCE' && user.role !== 'HR') {
-      where.initiatorId = user.id;
-    }
+    // Escopo por setor/hierarquia (Fase 0 · Passo 3): substitui o filtro grosso
+    // por papel. ADMIN/DIRETORIA veem tudo; Líder I vê o setor; Líder II vê seus
+    // Membros; Membro vê só os próprios. Demais filtros compõem por cima.
+    const where: any = await buildRequestWhere(user);
     if (status) where.status = status;
     if (type) where.flow = { type };
     if (search) where.title = { contains: search };
@@ -73,7 +56,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
       },
     });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (!isInvolved(req.user, request)) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    if (!(await canViewRequest(req.user, request))) { res.status(403).json({ error: 'Acesso negado' }); return; }
     res.json(request);
   } catch {
     res.status(500).json({ error: 'Erro ao buscar solicitação' });
@@ -323,7 +306,7 @@ router.post('/:id/attachments', authenticate, handleUpload(upload.array('files',
 
     const inv = await loadInvolvement(req.params.id);
     if (!inv) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (!isInvolved(req.user, inv)) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    if (!(await canViewRequest(req.user, inv))) { res.status(403).json({ error: 'Acesso negado' }); return; }
 
     const attachments = await Promise.all(files.map((file) =>
       prisma.attachment.create({
@@ -359,7 +342,7 @@ router.get('/:id/attachments', authenticate, async (req: AuthRequest, res: Respo
   try {
     const inv = await loadInvolvement(req.params.id);
     if (!inv) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (!isInvolved(req.user, inv)) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    if (!(await canViewRequest(req.user, inv))) { res.status(403).json({ error: 'Acesso negado' }); return; }
     const attachments = await prisma.attachment.findMany({
       where: { requestId: req.params.id },
       orderBy: { createdAt: 'desc' },
@@ -374,7 +357,7 @@ router.get('/:id/audit', authenticate, async (req: AuthRequest, res: Response) =
   try {
     const inv = await loadInvolvement(req.params.id);
     if (!inv) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (!isInvolved(req.user, inv)) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    if (!(await canViewRequest(req.user, inv))) { res.status(403).json({ error: 'Acesso negado' }); return; }
     const logs = await prisma.auditLog.findMany({
       where: { requestId: req.params.id },
       orderBy: { createdAt: 'asc' },
@@ -460,20 +443,16 @@ async function loadInvolvement(requestId: string) {
   });
 }
 
-function canAccessComments(user: AuthRequest['user'], inv: NonNullable<Awaited<ReturnType<typeof loadInvolvement>>>): boolean {
-  if (user.role === 'ADMIN') return true;
-  return (
-    inv.initiatorId === user.id ||
-    inv.tasks.some((t) => t.assigneeId === user.id) ||
-    inv.approvals.some((a) => a.approverId === user.id)
-  );
+// Acesso a comentários: mesma semântica de escopo do detalhe do pedido.
+function canAccessComments(user: AuthRequest['user'], inv: NonNullable<Awaited<ReturnType<typeof loadInvolvement>>>): Promise<boolean> {
+  return canViewRequest(user, inv);
 }
 
 router.get('/:id/comments', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const inv = await loadInvolvement(req.params.id);
     if (!inv) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (!canAccessComments(req.user, inv)) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    if (!(await canAccessComments(req.user, inv))) { res.status(403).json({ error: 'Acesso negado' }); return; }
     const comments = await prisma.comment.findMany({
       where: { requestId: req.params.id },
       include: { author: { select: { id: true, name: true } } },
@@ -491,7 +470,7 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res: Respons
     if (!body || !body.trim()) { res.status(400).json({ error: 'O comentário não pode ser vazio' }); return; }
     const inv = await loadInvolvement(req.params.id);
     if (!inv) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (!canAccessComments(req.user, inv)) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    if (!(await canAccessComments(req.user, inv))) { res.status(403).json({ error: 'Acesso negado' }); return; }
 
     const comment = await prisma.$transaction(async (tx) => {
       const created = await tx.comment.create({

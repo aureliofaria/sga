@@ -64,16 +64,39 @@ export async function createRequestTasks(requestId: string, flowId: string, step
       if (!hasResource) continue;
     }
 
+    // Etapa de SUBMISSÃO/REQUISIÇÃO (o próprio iniciador executa a sua parte):
+    // não tem alçada (authLevels) E o papel requerido é ausente ou o papel-base
+    // 'USER' (catch-all). Antes, um requiredRole='USER' difundia a tarefa a TODOS
+    // os usuários do papel (resíduo de IDOR de leitura) — agora a tarefa dessa
+    // etapa recai SOMENTE no iniciador, sem broadcast indiscriminado.
+    //
+    // Etapas de APROVAÇÃO (com authLevels) ou de uma FUNÇÃO específica
+    // (requiredRole ≠ 'USER', ex.: MANAGER/FINANCE/HR/TI/...) mantêm a segregação
+    // de funções (SoD): atribuídas a TODOS os outros usuários do papel, EXCLUINDO
+    // o iniciador; recai sobre o iniciador apenas quando ele é o único do papel.
+    const initiator = await db.user.findUnique({
+      where: { id: request.initiatorId },
+      select: { id: true, name: true },
+    });
+
+    const hasAuthLevels = step.authLevels.length > 0;
+    const isSelfSubmissionStep = !hasAuthLevels && (!step.requiredRole || step.requiredRole === 'USER');
+
     let assignees: { id: string; name: string }[] = [];
-    if (step.requiredRole) {
-      assignees = await db.user.findMany({
-        where: { role: step.requiredRole, isActive: true, id: { not: request.initiatorId } },
-        select: { id: true, name: true },
-      });
-    }
-    if (assignees.length === 0) {
-      const initiator = await db.user.findUnique({ where: { id: request.initiatorId }, select: { id: true, name: true } });
+    if (isSelfSubmissionStep) {
+      // Submissão do iniciador: só o iniciador, sem difundir ao papel inteiro.
       if (initiator) assignees = [initiator];
+    } else {
+      if (step.requiredRole) {
+        assignees = await db.user.findMany({
+          where: { role: step.requiredRole, isActive: true, id: { not: request.initiatorId } },
+          select: { id: true, name: true },
+        });
+      }
+      // Sem outros do papel (ou etapa sem papel): recai sobre o iniciador.
+      if (assignees.length === 0 && initiator) {
+        assignees = [initiator];
+      }
     }
 
     const dueDate = step.deadlineHours ? new Date(Date.now() + step.deadlineHours * 60 * 60 * 1000) : null;
