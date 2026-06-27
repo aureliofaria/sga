@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { upload } from '../middleware/upload';
+import { upload, handleUpload } from '../middleware/upload';
 import { advanceRequest, processSlaExpiries } from '../services/workflow';
 
 const router = Router();
@@ -101,6 +101,12 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
       },
     });
     if (!task) { res.status(404).json({ error: 'Tarefa não encontrada' }); return; }
+    // Anti-IDOR: só o responsável pela tarefa, o iniciador da solicitação ou um
+    // papel de visão ampla (ADMIN/MANAGER/FINANCE/HR) podem ver a tarefa.
+    const privileged = ['ADMIN', 'MANAGER', 'FINANCE', 'HR'].includes(req.user.role);
+    if (!privileged && task.assigneeId !== req.user.id && task.request.initiatorId !== req.user.id) {
+      res.status(403).json({ error: 'Acesso negado' }); return;
+    }
     res.json(task);
   } catch {
     res.status(500).json({ error: 'Erro ao buscar tarefa' });
@@ -199,12 +205,13 @@ router.post('/:id/reject', authenticate, async (req: AuthRequest, res: Response)
   }
 });
 
-router.post('/:id/attachments', authenticate, upload.array('files', 10), async (req: AuthRequest, res: Response) => {
+router.post('/:id/attachments', authenticate, handleUpload(upload.array('files', 10)), async (req: AuthRequest, res: Response) => {
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) { res.status(400).json({ error: 'Nenhum arquivo enviado' }); return; }
-    const task = await prisma.requestTask.findUnique({ where: { id: req.params.id } });
-    if (!task) { res.status(404).json({ error: 'Tarefa não encontrada' }); return; }
+    // Anti-IDOR: só o responsável pela tarefa (ou ADMIN) pode anexar.
+    const task = await loadOwnedTask(req, res);
+    if (!task) return;
 
     const attachments = await Promise.all(files.map((file) =>
       prisma.attachment.create({
