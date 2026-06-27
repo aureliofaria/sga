@@ -29,6 +29,7 @@ model User {
   comments                Comment[]
   notifications           Notification[]
   notificationPreferences NotificationPreference[]
+  paymentRecurrences      PaymentRecurrence[]      @relation("RecurrenceInitiator")
 
   // Inventário patrimonial
   assetsInPossession    Asset[]          @relation("AssetUser")
@@ -91,6 +92,7 @@ model FlowTemplate {
   isActive    Boolean    @default(true)
   steps       FlowStep[]
   requests    Request[]
+  recurrences PaymentRecurrence[]
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 }
@@ -149,6 +151,12 @@ model Request {
   supplier         String?
   costCenter       String?
   justification    String?
+  // Categoria do pagamento (obrigatória quando flow.type = PAYMENT):
+  // COMPRA | SERVICO | ASSINATURA | RECORRENCIA | SALARIO | REEMBOLSO
+  paymentCategory  String?
+  // Origem: solicitação avulsa ou gerada por uma recorrência (rastreabilidade).
+  recurrenceId     String?
+  recurrence       PaymentRecurrence? @relation(fields: [recurrenceId], references: [id])
   vacancyType      String?
   replacementName  String?
   tasks            RequestTask[]
@@ -161,6 +169,36 @@ model Request {
   notifications    Notification[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
+}
+
+// Pagamentos recorrentes: modelo "agendador" que gera Requests PAYMENT
+// periodicamente. O pedido gerado segue o MESMO fluxo de aprovação por alçada
+// (recorrência não pula etapas). A geração é idempotente por janela via guarda
+// otimista em nextRunAt.
+model PaymentRecurrence {
+  id              String    @id @default(cuid())
+  flowId          String
+  flow            FlowTemplate @relation(fields: [flowId], references: [id])
+  initiatorId     String
+  initiator       User      @relation("RecurrenceInitiator", fields: [initiatorId], references: [id])
+  title           String
+  paymentCategory String // normalmente RECORRENCIA | ASSINATURA | SALARIO
+  amountCents     Int
+  supplier        String?
+  costCenter      String?
+  justification   String?
+  // MONTH | WEEK
+  intervalUnit    String    @default("MONTH")
+  intervalCount   Int       @default(1)
+  nextRunAt       DateTime
+  lastRunAt       DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  requests Request[]
+
+  @@index([isActive, nextRunAt])
 }
 
 model Comment {

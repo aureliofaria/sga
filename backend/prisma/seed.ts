@@ -152,9 +152,11 @@ async function main() {
       flowTemplateId: pagamentoFlow.id,
       order: 0,
       name: 'Solicitação',
-      description: 'Detalhamento da solicitação de pagamento',
+      description: 'Detalhamento da solicitação de pagamento (categoria, valor, centro de custo, justificativa e anexos)',
       requiredRole: 'USER',
-      requiresAttachment: false,
+      // Toda solicitação de pagamento exige ao menos um anexo (nota fiscal,
+      // contrato, comprovante, folha, etc.) antes de seguir para aprovação.
+      requiresAttachment: true,
     },
   });
 
@@ -273,6 +275,7 @@ async function main() {
       supplier: 'Figma Inc.',
       costCenter: 'TI-001',
       justification: 'Ferramenta essencial para o time de design e produto',
+      paymentCategory: 'ASSINATURA',
     },
   });
 

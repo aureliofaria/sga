@@ -89,18 +89,28 @@ router.post('/process-sla', authenticate, async (req: AuthRequest, res: Response
   }
 });
 
+const WIDE_VIEW_ROLES = ['ADMIN', 'MANAGER', 'FINANCE', 'HR'];
+
 router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const task = await prisma.requestTask.findUnique({
       where: { id: req.params.id },
       include: {
-        request: { include: { flow: true } },
+        request: { include: { flow: true, approvals: { select: { approverId: true } } } },
         assignee: { select: { id: true, name: true, email: true } },
         step: { include: { authLevels: true } },
         attachments: true,
       },
     });
     if (!task) { res.status(404).json({ error: 'Tarefa não encontrada' }); return; }
+    // IDOR: só o responsável, o iniciador, um aprovador da solicitação ou um
+    // papel de visão ampla pode ver a tarefa (revela valor/iniciador/anexos).
+    const involved =
+      WIDE_VIEW_ROLES.includes(req.user.role) ||
+      task.assigneeId === req.user.id ||
+      task.request.initiatorId === req.user.id ||
+      task.request.approvals.some((a) => a.approverId === req.user.id);
+    if (!involved) { res.status(403).json({ error: 'Acesso negado' }); return; }
     res.json(task);
   } catch {
     res.status(500).json({ error: 'Erro ao buscar tarefa' });
@@ -205,6 +215,10 @@ router.post('/:id/attachments', authenticate, upload.array('files', 10), async (
     if (!files || files.length === 0) { res.status(400).json({ error: 'Nenhum arquivo enviado' }); return; }
     const task = await prisma.requestTask.findUnique({ where: { id: req.params.id } });
     if (!task) { res.status(404).json({ error: 'Tarefa não encontrada' }); return; }
+    // IDOR: só o responsável pela tarefa (ou ADMIN) pode anexar a ela.
+    if (task.assigneeId !== req.user.id && req.user.role !== 'ADMIN') {
+      res.status(403).json({ error: 'Esta tarefa não está atribuída a você' }); return;
+    }
 
     const attachments = await Promise.all(files.map((file) =>
       prisma.attachment.create({

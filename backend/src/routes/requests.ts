@@ -7,8 +7,36 @@ import { canOpenRequestType } from '../lib/users';
 import { APPROVER_ROLES } from '../config';
 import { notify, notifyMany } from '../services/notifications';
 import { parseCents } from '../lib/money';
+import { validatePaymentRequest, isPaymentCategory } from '../lib/payments';
 
 const router = Router();
+
+// Carrega quem está envolvido em uma solicitação (iniciador, responsáveis de
+// tarefa, aprovadores) e decide se o usuário pode VISUALIZAR/anexar.
+// Papéis com visão ampla (ADMIN/MANAGER/FINANCE/HR) sempre podem — espelha a
+// listagem GET /, que já expõe todas as solicitações a esses papéis.
+const WIDE_VIEW_ROLES = ['ADMIN', 'MANAGER', 'FINANCE', 'HR'];
+
+async function canAccessRequest(
+  user: { id: string; role: string },
+  requestId: string,
+): Promise<boolean> {
+  if (WIDE_VIEW_ROLES.includes(user.role)) return true;
+  const inv = await prisma.request.findUnique({
+    where: { id: requestId },
+    select: {
+      initiatorId: true,
+      tasks: { select: { assigneeId: true } },
+      approvals: { select: { approverId: true } },
+    },
+  });
+  if (!inv) return false;
+  return (
+    inv.initiatorId === user.id ||
+    inv.tasks.some((t) => t.assigneeId === user.id) ||
+    inv.approvals.some((a) => a.approverId === user.id)
+  );
+}
 
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
@@ -56,6 +84,13 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
       },
     });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
+    // IDOR: só envolvidos (ou papéis de visão ampla) leem a solicitação.
+    const involved =
+      WIDE_VIEW_ROLES.includes(req.user.role) ||
+      request.initiatorId === req.user.id ||
+      request.tasks.some((t: any) => t.assignee?.id === req.user.id) ||
+      request.approvals.some((a: any) => a.approver?.id === req.user.id);
+    if (!involved) { res.status(403).json({ error: 'Acesso negado' }); return; }
     res.json(request);
   } catch {
     res.status(500).json({ error: 'Erro ao buscar solicitação' });
@@ -66,7 +101,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { flowId, title, description, targetEmployee, targetDepartment, startDate,
             amountCents, supplier, costCenter, justification, vacancyType, replacementName,
-            resourceIds } = req.body;
+            paymentCategory, resourceIds } = req.body;
     if (!flowId || !title) { res.status(400).json({ error: 'Fluxo e título são obrigatórios' }); return; }
     const amount = parseCents(amountCents);
     if (!amount.ok) { res.status(400).json({ error: 'Valor (amountCents) inválido' }); return; }
@@ -77,6 +112,19 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
     if (!canOpenRequestType(req.user, flow.type)) {
       res.status(403).json({ error: 'Você não tem permissão para abrir este tipo de solicitação' });
       return;
+    }
+
+    // Regras específicas de PAGAMENTO: categoria + campos obrigatórios + valor.
+    // Os anexos exigidos são cobrados ao concluir a etapa de solicitação.
+    let normalizedCategory: string | null = null;
+    if (flow.type === 'PAYMENT') {
+      const paymentError = validatePaymentRequest({
+        paymentCategory, amountCents: amount.value, costCenter, justification, supplier,
+      });
+      if (paymentError) { res.status(400).json({ error: paymentError }); return; }
+      normalizedCategory = paymentCategory;
+    } else if (isPaymentCategory(paymentCategory)) {
+      normalizedCategory = paymentCategory;
     }
 
     const request = await prisma.request.create({
@@ -94,6 +142,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         supplier,
         costCenter,
         justification,
+        paymentCategory: normalizedCategory,
         vacancyType: vacancyType || null,
         replacementName: replacementName || null,
       },
@@ -302,6 +351,8 @@ router.post('/:id/attachments', authenticate, upload.array('files', 10), async (
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) { res.status(400).json({ error: 'Nenhum arquivo enviado' }); return; }
+    // IDOR: só envolvidos podem anexar a uma solicitação.
+    if (!(await canAccessRequest(req.user, req.params.id))) { res.status(403).json({ error: 'Acesso negado' }); return; }
 
     const attachments = await Promise.all(files.map((file) =>
       prisma.attachment.create({
@@ -335,6 +386,8 @@ router.post('/:id/attachments', authenticate, upload.array('files', 10), async (
 
 router.get('/:id/attachments', authenticate, async (req: AuthRequest, res: Response) => {
   try {
+    // IDOR: só envolvidos listam os anexos (metadados podem revelar dados sensíveis).
+    if (!(await canAccessRequest(req.user, req.params.id))) { res.status(403).json({ error: 'Acesso negado' }); return; }
     const attachments = await prisma.attachment.findMany({
       where: { requestId: req.params.id },
       orderBy: { createdAt: 'desc' },
@@ -347,6 +400,8 @@ router.get('/:id/attachments', authenticate, async (req: AuthRequest, res: Respo
 
 router.get('/:id/audit', authenticate, async (req: AuthRequest, res: Response) => {
   try {
+    // IDOR: a trilha de auditoria de uma solicitação só é vista por envolvidos.
+    if (!(await canAccessRequest(req.user, req.params.id))) { res.status(403).json({ error: 'Acesso negado' }); return; }
     const logs = await prisma.auditLog.findMany({
       where: { requestId: req.params.id },
       orderBy: { createdAt: 'asc' },

@@ -64,16 +64,37 @@ export async function createRequestTasks(requestId: string, flowId: string, step
       if (!hasResource) continue;
     }
 
+    // Etapa de DECISÃO/ALÇADA: assignees devem ter um papel aprovador válido
+    // (requiredRole OU qualquer approverRole das faixas), NUNCA o iniciador
+    // (segregação de funções). Sem fallback para o iniciador — se não houver
+    // aprovador, a etapa fica pendente e cabe ao ADMIN intervir (jamais o
+    // próprio solicitante decide o próprio pedido).
+    const isDecisionStep = step.authLevels.length > 0;
+
     let assignees: { id: string; name: string }[] = [];
-    if (step.requiredRole) {
+    if (isDecisionStep) {
+      const roles = Array.from(new Set([
+        ...(step.requiredRole ? [step.requiredRole] : []),
+        ...step.authLevels.map(l => l.approverRole),
+      ]));
       assignees = await db.user.findMany({
-        where: { role: step.requiredRole, isActive: true, id: { not: request.initiatorId } },
+        where: { role: { in: roles }, isActive: true, id: { not: request.initiatorId } },
         select: { id: true, name: true },
       });
-    }
-    if (assignees.length === 0) {
-      const initiator = await db.user.findUnique({ where: { id: request.initiatorId }, select: { id: true, name: true } });
-      if (initiator) assignees = [initiator];
+      // Sem fallback: etapa de alçada não pode ser atribuída ao iniciador.
+    } else {
+      if (step.requiredRole) {
+        assignees = await db.user.findMany({
+          where: { role: step.requiredRole, isActive: true, id: { not: request.initiatorId } },
+          select: { id: true, name: true },
+        });
+      }
+      if (assignees.length === 0) {
+        // Etapa operacional (não-decisória): fallback ao iniciador para não
+        // travar o fluxo (ex.: etapa de "Solicitação" do próprio autor).
+        const initiator = await db.user.findUnique({ where: { id: request.initiatorId }, select: { id: true, name: true } });
+        if (initiator) assignees = [initiator];
+      }
     }
 
     const dueDate = step.deadlineHours ? new Date(Date.now() + step.deadlineHours * 60 * 60 * 1000) : null;
