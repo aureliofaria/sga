@@ -13,6 +13,13 @@
 // (role legado 'HR' OU membro de setor cuja função inclui 'RH' via
 // SECTOR_FUNCTIONS) OU papel DIRETORIA OU papel ADMIN. Todos os demais recebem
 // o valor mascarado. A política mora numa estrutura por tipo, fácil de afinar.
+//
+// Acesso por PAPEL GLOBAL, não por setor: o acesso a PII segue o papel global
+// (ADMIN/DIRETORIA) + a função RH — exatamente como visibility.ts chaveia a
+// visão global por PAPEL, não por filiação de setor. Ser membro do *setor*
+// "Diretoria" (cuja função de fluxo é DIRETORIA) NÃO concede acesso a PII por
+// si só; é preciso o papel global DIRETORIA. Por isso a função 'DIRETORIA'
+// deliberadamente NÃO consta de nenhuma regra da política (só a função 'RH').
 // ============================================================================
 
 import prisma from './prisma';
@@ -61,13 +68,19 @@ const MASK_BY_TYPE: Record<SensitiveType, string> = {
   PHONE_PERSONAL: '(••) •••••-••••',
 };
 
+// Máscara genérica fail-safe: usada se um tipo desconhecido chegar em runtime
+// (ex.: valor dinâmico do Passo 7 cujo tipo não esteja tipado por TS). Garante
+// que NUNCA se devolve o valor cru nem `undefined` (que apagaria o campo).
+const GENERIC_MASK = '••••••';
+
 // Mascara um valor de tipo sensível. Valor nulo/indefinido/vazio -> ''.
-// NUNCA revela parte do dado: a saída é uma constante por tipo.
+// NUNCA revela parte do dado: a saída é uma constante por tipo. Tipo
+// desconhecido (defensivo, fora do contrato TS) -> máscara genérica fail-safe.
 export function maskValue(type: SensitiveType, value: string | number | null | undefined): string {
   if (value === null || value === undefined) return '';
   const raw = typeof value === 'number' ? String(value) : value;
   if (raw.trim() === '') return '';
-  return MASK_BY_TYPE[type];
+  return MASK_BY_TYPE[type] ?? GENERIC_MASK;
 }
 
 // --- Resolução de acesso (espelha o estilo de visibility.ts) ----------------

@@ -48,6 +48,14 @@ describe('mascaramento de campos sensíveis (Fase 0 · Passo 4)', () => {
         }
       }
     });
+
+    it('tipo desconhecido (defensivo) cai em máscara genérica fail-safe, nunca no valor cru', () => {
+      // Fora do contrato TS: simula um tipo dinâmico (Passo 7) não previsto.
+      const out = maskValue('NAO_EXISTE' as SensitiveType, '123.456.789-09');
+      expect(out).toBe('••••••');
+      expect(out).not.toContain('1'); // não vaza dígito
+      expect(out).not.toBe(undefined); // nunca apaga/retorna undefined
+    });
   });
 
   describe('resolveViewerSensitiveAccess', () => {
@@ -94,6 +102,25 @@ describe('mascaramento de campos sensíveis (Fase 0 · Passo 4)', () => {
 
     it('usuário sem filiação e papel comum não libera nada', async () => {
       const u = await makeUser('USER', 'comum');
+      const allowed = await resolveViewerSensitiveAccess(u);
+      expect(allowed.size).toBe(0);
+    });
+
+    it("membro do SETOR 'Diretoria' sem o PAPEL global DIRETORIA NÃO libera PII", async () => {
+      // Intencional: acesso a PII segue o PAPEL global (ADMIN/DIRETORIA) + função
+      // RH — como visibility.ts chaveia visão global por papel, não por setor. A
+      // função de fluxo DIRETORIA não consta de nenhuma regra da política.
+      const sector = await prisma.sector.create({ data: { name: 'Diretoria' } });
+      const u = await makeUser('USER', 'membro-diretoria');
+      await prisma.sectorMember.create({ data: { sectorId: sector.id, userId: u.id, role: 'PROTETOR', level: 'MEMBRO' } });
+      const allowed = await resolveViewerSensitiveAccess(u);
+      expect(allowed.size).toBe(0);
+    });
+
+    it('match de papel é case-sensitive exato (fail-safe: variação de caixa nega)', async () => {
+      // Documenta a expectativa: seeds/imports devem gravar o papel canônico em
+      // CAIXA ALTA. Uma variação como 'hr' não concede acesso (nega, não vaza).
+      const u = await makeUser('hr', 'rh-minusculo');
       const allowed = await resolveViewerSensitiveAccess(u);
       expect(allowed.size).toBe(0);
     });
