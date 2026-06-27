@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { upload } from '../middleware/upload';
+import { upload, handleUpload } from '../middleware/upload';
 import { createRequestTasks, advanceRequest } from '../services/workflow';
 import { canOpenRequestType } from '../lib/users';
 import { APPROVER_ROLES } from '../config';
@@ -347,7 +347,7 @@ router.post('/:id/reject', authenticate, async (req: AuthRequest, res: Response)
   }
 });
 
-router.post('/:id/attachments', authenticate, upload.array('files', 10), async (req: AuthRequest, res: Response) => {
+router.post('/:id/attachments', authenticate, handleUpload(upload.array('files', 10)), async (req: AuthRequest, res: Response) => {
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) { res.status(400).json({ error: 'Nenhum arquivo enviado' }); return; }
