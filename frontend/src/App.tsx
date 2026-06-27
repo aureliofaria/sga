@@ -17,6 +17,7 @@ import ResourceManagement from './pages/ResourceManagement';
 import Inventory from './pages/Inventory';
 import AuditLog from './pages/AuditLog';
 import Notifications from './pages/Notifications';
+import PaymentRecurrences from './pages/PaymentRecurrences';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -46,6 +47,7 @@ function AppRoutes() {
         <Route path="/requests" element={<Requests />} />
         <Route path="/requests/new" element={<NewRequest />} />
         <Route path="/requests/:id" element={<RequestDetail />} />
+        <Route path="/payments/recurrences" element={<ProtectedRoute roles={['ADMIN', 'FINANCE', 'MANAGER']}><PaymentRecurrences /></ProtectedRoute>} />
         <Route path="/tasks" element={<MyTasks />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/sectors" element={<ProtectedRoute adminOnly><Setores /></ProtectedRoute>} />

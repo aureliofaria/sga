@@ -8,6 +8,7 @@ import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import type { FlowTemplate } from '../types';
+import { PAYMENT_CATEGORIES, getCategory } from '../lib/paymentCategories';
 
 const flowTypes = [
   { type: 'ONBOARDING', label: 'Admissão de Colaborador', desc: 'Processo de admissão de novo funcionário', icon: '👤', color: 'border-green-200 hover:border-green-400' },
@@ -42,6 +43,7 @@ export default function NewRequest() {
   const [vacancyType, setVacancyType] = useState('');
   const [replacementName, setReplacementName] = useState('');
   const [selectedResourceIds, setSelectedResourceIds] = useState<string[]>([]);
+  const [paymentCategory, setPaymentCategory] = useState('');
 
   const { data: flows = [] } = useQuery({ queryKey: ['flows'], queryFn: () => flowsApi.getAll() });
   const filteredFlows = flows.filter((f) => f.type === selectedType && f.isActive);
@@ -81,6 +83,8 @@ export default function NewRequest() {
         data.supplier = form.supplier;
         data.costCenter = form.costCenter;
         data.justification = form.justification;
+        // Categoria só se aplica a PAGAMENTO (o backend a exige nesse fluxo).
+        if (selectedType === 'PAYMENT') data.paymentCategory = paymentCategory || undefined;
       }
       const req = await requestsApi.create(data);
       if (pendingFiles.length > 0) {
@@ -98,12 +102,24 @@ export default function NewRequest() {
   const totalSteps = 5;
   const isHR = ['ONBOARDING', 'OFFBOARDING'].includes(selectedType);
   const isFinancial = ['PAYMENT', 'PURCHASE'].includes(selectedType);
+  const isPayment = selectedType === 'PAYMENT';
+  const categoryDef = getCategory(paymentCategory);
 
   const canNext = () => {
     if (step === 1) return !!selectedType;
     if (step === 2) return !!selectedFlow;
     if (step === 3) {
-      if (!form.title) return false;
+      if (!form.title.trim()) return false;
+      if (isPayment) {
+        // Espelha as validações do backend (lib/payments.ts): categoria, valor>0,
+        // centro de custo, justificativa e fornecedor quando a categoria exige.
+        if (!paymentCategory) return false;
+        const reais = form.amount ? parseFloat(form.amount.replace(/[^0-9.]/g, '')) : NaN;
+        if (!Number.isFinite(reais) || reais <= 0) return false;
+        if (!form.costCenter.trim()) return false;
+        if (!form.justification.trim()) return false;
+        if (categoryDef?.requiresSupplier && !form.supplier.trim()) return false;
+      }
       return true;
     }
     return true;
@@ -263,18 +279,40 @@ export default function NewRequest() {
                   )}
                 </>
               )}
+              {isPayment && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Categoria do Pagamento *</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {PAYMENT_CATEGORIES.map((c) => (
+                      <button
+                        type="button"
+                        key={c.code}
+                        onClick={() => setPaymentCategory(c.code)}
+                        className={`p-3 border-2 rounded-lg text-left transition-all ${paymentCategory === c.code ? 'border-golplus-blue-500 bg-golplus-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
+                      >
+                        <div className="text-xl">{c.icon}</div>
+                        <div className="text-sm font-medium text-gray-900">{c.label}</div>
+                        <div className="text-xs text-gray-500">{c.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {categoryDef && (
+                    <p className="text-xs text-amber-600 mt-2">{categoryDef.attachmentHint} (anexe na próxima etapa)</p>
+                  )}
+                </div>
+              )}
               {isFinancial && (
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Valor (R$) *</label>
-                    <input type="number" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="0,00" />
+                    <input type="number" step="0.01" min="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="0,00" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Fornecedor</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Fornecedor{isPayment && categoryDef?.requiresSupplier ? ' *' : ''}</label>
                     <input type="text" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Nome do fornecedor" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Centro de Custo</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Centro de Custo{isPayment ? ' *' : ''}</label>
                     <input type="text" value={form.costCenter} onChange={(e) => setForm({ ...form, costCenter: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Ex: TI-001" />
                   </div>
                   <div>
@@ -310,6 +348,7 @@ export default function NewRequest() {
               <div className="flex justify-between text-sm"><span className="text-gray-500">Tipo:</span><FlowTypeBadge type={selectedType} /></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Fluxo:</span><span className="font-medium">{selectedFlow?.name}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Título:</span><span className="font-medium">{form.title}</span></div>
+              {isPayment && categoryDef && <div className="flex justify-between text-sm"><span className="text-gray-500">Categoria:</span><span className="font-medium">{categoryDef.icon} {categoryDef.label}</span></div>}
               {form.amount && <div className="flex justify-between text-sm"><span className="text-gray-500">Valor:</span><span className="font-medium text-golplus-blue-700">R$ {parseFloat(form.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>}
               {form.targetEmployee && <div className="flex justify-between text-sm"><span className="text-gray-500">Colaborador:</span><span className="font-medium">{form.targetEmployee}</span></div>}
               {pendingFiles.length > 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">Anexos:</span><span className="font-medium">{pendingFiles.length} arquivo(s)</span></div>}

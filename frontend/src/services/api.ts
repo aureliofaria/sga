@@ -127,6 +127,39 @@ export const requestsApi = {
     api.post<Comment>(`/requests/${id}/comments`, { body, stepOrder }).then((r) => r.data),
 };
 
+// Pagamentos — recorrências
+export interface PaymentRecurrence {
+  id: string;
+  flowId: string;
+  initiatorId: string;
+  title: string;
+  paymentCategory: string;
+  amountCents: number;
+  supplier?: string | null;
+  costCenter?: string | null;
+  justification?: string | null;
+  intervalUnit: string;
+  intervalCount: number;
+  nextRunAt: string;
+  lastRunAt?: string | null;
+  isActive: boolean;
+  flow?: { id: string; name: string; type: string };
+}
+
+export const paymentsApi = {
+  listRecurrences: () => api.get<PaymentRecurrence[]>('/payments/recurrences').then((r) => r.data),
+  createRecurrence: (data: {
+    flowId: string; title: string; paymentCategory: string; amountCents: number;
+    supplier?: string; costCenter: string; justification: string;
+    intervalUnit: string; intervalCount: number; nextRunAt?: string;
+  }) => api.post<PaymentRecurrence>('/payments/recurrences', data).then((r) => r.data),
+  updateRecurrence: (id: string, data: Partial<{
+    isActive: boolean; title: string; amountCents: number; supplier: string;
+    costCenter: string; justification: string; intervalUnit: string; intervalCount: number; nextRunAt: string;
+  }>) => api.put<PaymentRecurrence>(`/payments/recurrences/${id}`, data).then((r) => r.data),
+  runRecurrences: () => api.post<{ created: number }>('/payments/recurrences/run', {}).then((r) => r.data),
+};
+
 // Tasks
 export const tasksApi = {
   getMy: () => api.get<RequestTask[]>('/tasks/my').then((r) => r.data),

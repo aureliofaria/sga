@@ -11,6 +11,7 @@ const navItems = [
   { path: '/notifications', label: 'Notificações', icon: '🔔', roles: ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'] },
   { path: '/requests', label: 'Solicitações', icon: '📋', roles: ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'] },
   { path: '/requests/new', label: 'Nova Solicitação', icon: '➕', roles: ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'] },
+  { path: '/payments/recurrences', label: 'Recorrências', icon: '🔁', roles: ['ADMIN', 'FINANCE', 'MANAGER'] },
   { path: '/sectors', label: 'Setores', icon: '🏢', roles: ['ADMIN'] },
   { path: '/resources', label: 'Recursos', icon: '🗂️', roles: ['ADMIN'] },
   { path: '/inventory', label: 'Inventário', icon: '📦', roles: ['ADMIN', 'MANAGER'] },
