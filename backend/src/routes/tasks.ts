@@ -5,6 +5,7 @@ import { upload, handleUpload } from '../middleware/upload';
 import { advanceRequest, processSlaExpiries, publishWorkflowEvent } from '../services/workflow';
 import { notify } from '../services/notifications';
 import { isFunctionRole } from '../lib/queue';
+import { checklistUnmet } from '../lib/checklist';
 
 const router = Router();
 
@@ -54,6 +55,10 @@ router.post('/batch-complete', authenticate, async (req: AuthRequest, res: Respo
         }
         if ((await requiredFieldsUnmet(existing.stepId, existing.requestId)).length > 0) {
           skipped.push({ id: taskId, reason: 'campos obrigatórios não preenchidos' });
+          continue;
+        }
+        if ((await checklistUnmet(existing.stepId, existing.requestId)).length > 0) {
+          skipped.push({ id: taskId, reason: 'checklist incompleto' });
           continue;
         }
         const task = await prisma.requestTask.update({
@@ -183,6 +188,10 @@ router.post('/:id/complete', authenticate, async (req: AuthRequest, res: Respons
     const missing = await requiredFieldsUnmet(owned.stepId, owned.requestId);
     if (missing.length > 0) {
       res.status(400).json({ error: 'Há campos obrigatórios não preenchidos nesta etapa', missing }); return;
+    }
+    const pendingChecklist = await checklistUnmet(owned.stepId, owned.requestId);
+    if (pendingChecklist.length > 0) {
+      res.status(400).json({ error: 'Há itens de checklist obrigatórios não concluídos nesta etapa', pending: pendingChecklist }); return;
     }
     const { notes } = req.body;
     // Concluir implica assumir (Passo 6 — REF.2): se a etapa é de FUNÇÃO (fila),

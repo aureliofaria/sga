@@ -4,6 +4,7 @@ import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { parseCents } from '../lib/money';
 import { isFieldType } from '../lib/fieldValidation';
 import { SENSITIVE_TYPES, SensitiveType } from '../lib/fieldMasking';
+import { validateConditionPayload } from '../lib/checklist';
 
 const router = Router();
 
@@ -35,6 +36,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
             handlingSector: { select: { id: true, name: true } },
             activateOnSector: { select: { id: true, name: true } },
             formFields: { orderBy: { order: 'asc' } },
+            checklistItems: { orderBy: { order: 'asc' } },
           },
         },
       },
@@ -316,6 +318,79 @@ router.delete('/:flowId/steps/:stepId/fields/:fieldId', authenticate, requireRol
     res.json({ message: 'Campo removido com sucesso' });
   } catch {
     res.status(500).json({ error: 'Erro ao remover campo' });
+  }
+});
+
+// ===========================================================================
+// Checklist por etapa (Fase 0 · Passo 8) — definição (ADMIN).
+// POST/PUT/DELETE /:flowId/steps/:stepId/checklist[/:itemId].
+// Body POST: { label, order?, required?, condition? }.
+// condition: JSON com type ∈ {resourceItem, fieldValue} — validado aqui.
+// ===========================================================================
+
+router.post('/:flowId/steps/:stepId/checklist', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { label, order, required, condition } = req.body;
+    if (!label || typeof label !== 'string' || !label.trim()) {
+      res.status(400).json({ error: 'label é obrigatório' }); return;
+    }
+    // Valida condição se presente.
+    let conditionJson: string | null = null;
+    if (condition !== undefined && condition !== null) {
+      const v = validateConditionPayload(condition);
+      if (v.ok === false) { res.status(400).json({ error: v.error }); return; }
+      const parsed = JSON.parse(v.json);
+      conditionJson = parsed === null ? null : v.json;
+    }
+    const item = await prisma.checklistItem.create({
+      data: {
+        flowStepId: req.params.stepId,
+        label: label.trim(),
+        order: order !== undefined ? Number(order) || 0 : 0,
+        required: required !== undefined ? !!required : true,
+        condition: conditionJson,
+      },
+    });
+    res.status(201).json(item);
+  } catch {
+    res.status(500).json({ error: 'Erro ao criar item de checklist' });
+  }
+});
+
+router.put('/:flowId/steps/:stepId/checklist/:itemId', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
+  try {
+    const existing = await prisma.checklistItem.findUnique({ where: { id: req.params.itemId } });
+    if (!existing) { res.status(404).json({ error: 'Item de checklist não encontrado' }); return; }
+
+    const data: Record<string, unknown> = {};
+    if (req.body.label !== undefined) {
+      if (typeof req.body.label !== 'string' || !req.body.label.trim()) {
+        res.status(400).json({ error: 'label inválido' }); return;
+      }
+      data.label = req.body.label.trim();
+    }
+    if (req.body.order !== undefined) data.order = Number(req.body.order) || 0;
+    if (req.body.required !== undefined) data.required = !!req.body.required;
+    if ('condition' in req.body) {
+      const v = validateConditionPayload(req.body.condition);
+      if (v.ok === false) { res.status(400).json({ error: v.error }); return; }
+      const parsed = JSON.parse(v.json);
+      data.condition = parsed === null ? null : v.json;
+    }
+
+    const item = await prisma.checklistItem.update({ where: { id: req.params.itemId }, data });
+    res.json(item);
+  } catch {
+    res.status(500).json({ error: 'Erro ao atualizar item de checklist' });
+  }
+});
+
+router.delete('/:flowId/steps/:stepId/checklist/:itemId', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.checklistItem.delete({ where: { id: req.params.itemId } });
+    res.json({ message: 'Item de checklist removido com sucesso' });
+  } catch {
+    res.status(500).json({ error: 'Erro ao remover item de checklist' });
   }
 });
 

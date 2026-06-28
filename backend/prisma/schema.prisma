@@ -37,6 +37,9 @@ model User {
   assetMovementsTo      AssetMovement[]  @relation("MovDestinoUser")
   assetMovementsCreated AssetMovement[]  @relation("MovCreator")
   inventoryCounts       InventoryCount[] @relation("InventoryCountCreator")
+
+  // Checklist
+  checklistItemsChecked RequestChecklistItem[]
 }
 
 model Department {
@@ -127,6 +130,7 @@ model FlowStep {
   authLevels         AuthorizationLevel[]
   tasks              RequestTask[]
   formFields         FormField[]
+  checklistItems     ChecklistItem[]
   createdAt          DateTime             @default(now())
 }
 
@@ -216,6 +220,7 @@ model Request {
   comments         Comment[]
   notifications    Notification[]
   fieldValues      RequestFieldValue[]
+  checklistItems   RequestChecklistItem[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 }
@@ -500,4 +505,42 @@ model InventoryCountItem {
   updatedAt     DateTime       @updatedAt
 
   @@unique([countId, assetId])
+}
+
+// ===========================================================================
+// Checklist por etapa (Fase 0 · Passo 8) — definição (ChecklistItem) e estados
+// por solicitação (RequestChecklistItem). O campo `condition` armazena JSON
+// fechado descrevendo a condição de aplicabilidade do item; null = sempre visível.
+// ===========================================================================
+
+model ChecklistItem {
+  id         String                 @id @default(cuid())
+  flowStepId String
+  flowStep   FlowStep               @relation(fields: [flowStepId], references: [id], onDelete: Cascade)
+  label      String
+  order      Int                    @default(0)
+  required   Boolean                @default(true)
+  condition  String?                // JSON fechado; null = sempre aplicável
+  createdAt  DateTime               @default(now())
+  states     RequestChecklistItem[]
+
+  @@index([flowStepId])
+}
+
+model RequestChecklistItem {
+  id          String        @id @default(cuid())
+  requestId   String
+  request     Request       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        ChecklistItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  checked     Boolean       @default(false)
+  checkedById String?
+  checkedBy   User?         @relation(fields: [checkedById], references: [id], onDelete: SetNull)
+  checkedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([requestId, itemId])
+  @@index([requestId])
+  @@index([itemId])
 }

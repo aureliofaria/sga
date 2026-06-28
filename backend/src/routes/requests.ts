@@ -17,6 +17,7 @@ import {
   maskDynamicFieldValues,
 } from '../lib/fieldMasking';
 import { validateFieldValue } from '../lib/fieldValidation';
+import { isItemApplicable, evaluateApplicabilityInMemory, ApplicabilityContext } from '../lib/checklist';
 
 const router = Router();
 
@@ -89,7 +90,17 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     const request = await prisma.request.findUnique({
       where: { id: req.params.id },
       include: {
-        flow: { include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } } },
+        flow: {
+          include: {
+            steps: {
+              orderBy: { order: 'asc' },
+              include: {
+                authLevels: true,
+                checklistItems: { orderBy: { order: 'asc' } },
+              },
+            },
+          },
+        },
         initiator: { select: { id: true, name: true, email: true, role: true } },
         tasks: {
           include: { assignee: { select: { id: true, name: true, email: true } }, step: true },
@@ -100,6 +111,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
         auditLogs: { orderBy: { createdAt: 'asc' } },
         resources: { include: { resourceItem: { include: { sector: { select: { id: true, name: true } } } }, asset: { include: { item: { select: { name: true } } } } } },
         fieldValues: { include: { field: true } },
+        checklistItems: { include: { item: true } },
       },
     });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
@@ -109,6 +121,32 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     const allowed = await resolveViewerSensitiveAccess(req.user, prisma);
     const masked = await maskRequestForViewer(req.user, request, prisma, allowed);
     masked.fieldValues = await maskDynamicFieldValues(req.user, request.fieldValues, prisma, allowed);
+
+    // REF.1 — applicable computado no servidor (passo 8): carregamos UMA vez
+    // os resourceItemIds e fieldValues da solicitação e avaliamos cada condição
+    // EM MEMÓRIA (sem N+1). Incluímos os checklistItems de TODAS as etapas do
+    // fluxo com seus estados (checked) e o booleano applicable para o frontend.
+    const ctx: ApplicabilityContext = {
+      resourceItemIds: new Set(request.resources.map((r) => r.resourceItemId)),
+      fieldValues: new Map(request.fieldValues.map((fv: any) => [fv.field.key as string, fv.value as string])),
+    };
+    // Enriquece cada etapa com checklistItems anotados com applicable + checked.
+    const stepsWithChecklist = (masked as any).flow.steps.map((step: any) => {
+      const stateByItemId = new Map<string, boolean>(
+        request.checklistItems
+          .filter((rci) => rci.item.flowStepId === step.id)
+          .map((rci) => [rci.itemId, rci.checked])
+      );
+      const items = evaluateApplicabilityInMemory(step.checklistItems ?? [] as any[], ctx).map((ci: any) => ({
+        ...ci,
+        checked: stateByItemId.get(ci.id) ?? false,
+      }));
+      return { ...step, checklistItems: items };
+    });
+    (masked as any).flow = { ...(masked as any).flow, steps: stepsWithChecklist };
+    // Remove checklistItems da raiz (já estão dentro de cada etapa).
+    delete (masked as any).checklistItems;
+
     res.json(masked);
   } catch {
     res.status(500).json({ error: 'Erro ao buscar solicitação' });
@@ -682,6 +720,92 @@ router.post('/:id/fields', authenticate, async (req: AuthRequest, res: Response)
     res.json({ ok: true, count: prepared.length, savedFieldIds: prepared.map((p) => p.fieldId) });
   } catch {
     res.status(500).json({ error: 'Erro ao gravar valores de campos' });
+  }
+});
+
+// ===========================================================================
+// Marcar/desmarcar item de checklist (Fase 0 · Passo 8).
+// Body: { checked: boolean }. Autorização: ADMIN ou assignee de tarefa
+// PENDING/IN_PROGRESS na etapa do item (mesmo padrão do POST /:id/fields).
+// ===========================================================================
+router.post('/:id/checklist/:itemId', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { checked } = req.body as { checked?: boolean };
+    if (typeof checked !== 'boolean') {
+      res.status(400).json({ error: 'checked (boolean) é obrigatório' }); return;
+    }
+
+    // Carrega o item de checklist.
+    const item = await prisma.checklistItem.findUnique({
+      where: { id: req.params.itemId },
+      include: { flowStep: { select: { id: true, flowTemplateId: true } } },
+    });
+    if (!item) { res.status(404).json({ error: 'Item de checklist não encontrado' }); return; }
+
+    // Carrega a solicitação (para verificar o flowId).
+    const requestRecord = await prisma.request.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, flowId: true },
+    });
+    if (!requestRecord) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
+
+    // Valida que o item pertence a uma etapa do fluxo desta solicitação.
+    if (item.flowStep.flowTemplateId !== requestRecord.flowId) {
+      res.status(400).json({ error: 'Item de checklist não pertence ao fluxo desta solicitação' }); return;
+    }
+
+    // Valida aplicabilidade.
+    const applicable = await isItemApplicable(item, req.params.id);
+    if (!applicable) {
+      res.status(400).json({ error: 'Este item de checklist não se aplica a esta solicitação' }); return;
+    }
+
+    // Autorização: ADMIN ou assignee de tarefa PENDING/IN_PROGRESS na etapa do item.
+    if (req.user.role !== 'ADMIN') {
+      const openTask = await prisma.requestTask.count({
+        where: {
+          requestId: req.params.id,
+          assigneeId: req.user.id,
+          stepId: item.flowStepId,
+          status: { in: ['PENDING', 'IN_PROGRESS'] },
+        },
+      });
+      if (openTask === 0) {
+        res.status(403).json({ error: 'Acesso negado: você não tem tarefa aberta nesta etapa' }); return;
+      }
+    }
+
+    // Upsert do estado.
+    await prisma.requestChecklistItem.upsert({
+      where: { requestId_itemId: { requestId: req.params.id, itemId: req.params.itemId } },
+      update: {
+        checked,
+        checkedById: checked ? req.user.id : null,
+        checkedAt: checked ? new Date() : null,
+      },
+      create: {
+        requestId: req.params.id,
+        itemId: req.params.itemId,
+        checked,
+        checkedById: checked ? req.user.id : null,
+        checkedAt: checked ? new Date() : null,
+      },
+    });
+
+    // AuditLog.
+    await prisma.auditLog.create({
+      data: {
+        requestId: req.params.id,
+        userId: req.user.id,
+        userName: req.user.name,
+        action: checked ? 'CHECKLIST_ITEM_CHECKED' : 'CHECKLIST_ITEM_UNCHECKED',
+        details: JSON.stringify({ itemId: req.params.itemId, label: item.label }),
+      },
+    });
+
+    res.json({ ok: true, checked, itemId: req.params.itemId });
+  } catch {
+    res.status(500).json({ error: 'Erro ao marcar item de checklist' });
   }
 });
 
