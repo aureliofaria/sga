@@ -287,6 +287,50 @@ describe('filas de função — fan-out e conclusão (Passo 6)', () => {
     expect(reqAfter.status).toBe('COMPLETED');
   });
 
+  // Dono único: assumir falha se uma irmã já está IN_PROGRESS (fila tomada).
+  it('dono único: assumir retorna 409 se a fila já foi assumida por outro', async () => {
+    const initiator = await makeUser('USER', 'init');
+    const m1 = await makeUser('USER', 'rh-m1');
+    const m2 = await makeUser('USER', 'rh-m2');
+    await addMember('RH', m1.id, 'MEMBRO');
+    await addMember('RH', m2.id, 'MEMBRO');
+    const flow = await makeFlow('ONBOARDING', [{ order: 0, requiredRole: 'RH' }]);
+    const req = await prisma.request.create({
+      data: { flowId: flow.id, initiatorId: initiator.id, title: 't', status: 'IN_PROGRESS', currentStep: 0 },
+    });
+    await createRequestTasks(req.id, flow.id, 0);
+    const t1 = await prisma.requestTask.findFirstOrThrow({ where: { requestId: req.id, assigneeId: m1.id } });
+    const t2 = await prisma.requestTask.findFirstOrThrow({ where: { requestId: req.id, assigneeId: m2.id } });
+    // simula irmã já assumida (estado de corrida)
+    await prisma.requestTask.update({ where: { id: t1.id }, data: { status: 'IN_PROGRESS' } });
+
+    const res = await request(app).post(`/api/tasks/${t2.id}/claim`).set(auth(tokenFor(m2.id)));
+    expect(res.status).toBe(409);
+  });
+
+  // Finalização: concluir cancela também irmã IN_PROGRESS (não deixa órfã).
+  it('conclusão finaliza: concluir cancela irmã IN_PROGRESS, sem deixar tarefa presa', async () => {
+    const initiator = await makeUser('USER', 'init');
+    const m1 = await makeUser('USER', 'rh-m1');
+    const m2 = await makeUser('USER', 'rh-m2');
+    await addMember('RH', m1.id, 'MEMBRO');
+    await addMember('RH', m2.id, 'MEMBRO');
+    const flow = await makeFlow('ONBOARDING', [{ order: 0, requiredRole: 'RH' }]);
+    const req = await prisma.request.create({
+      data: { flowId: flow.id, initiatorId: initiator.id, title: 't', status: 'IN_PROGRESS', currentStep: 0 },
+    });
+    await createRequestTasks(req.id, flow.id, 0);
+    const t1 = await prisma.requestTask.findFirstOrThrow({ where: { requestId: req.id, assigneeId: m1.id } });
+    const t2 = await prisma.requestTask.findFirstOrThrow({ where: { requestId: req.id, assigneeId: m2.id } });
+    // m2 já assumida em paralelo (IN_PROGRESS); m1 conclui direto a sua linha
+    await prisma.requestTask.update({ where: { id: t2.id }, data: { status: 'IN_PROGRESS' } });
+
+    const comp = await request(app).post(`/api/tasks/${t1.id}/complete`).set(auth(tokenFor(m1.id)));
+    expect(comp.status).toBe(200);
+    const sib = await prisma.requestTask.findUniqueOrThrow({ where: { id: t2.id } });
+    expect(sib.status).toBe('CANCELLED'); // não ficou órfã IN_PROGRESS
+  });
+
   // I8 — isStepComplete ignora CANCELLED
   it('I8: isStepComplete só considera tarefas não-canceladas', async () => {
     const initiator = await makeUser('USER', 'init');

@@ -20,7 +20,7 @@ Sistema de gestão de aprovações e fluxos (admissão/onboarding, offboarding, 
 ## 3. Branches, PRs e o que contêm
 - **`claude/deploy-v1-2g02g7`** → PR **#8** (base→main). Pacote de deploy (DEPLOY.md, launcher de 1 clique, seed prod seguro), **rebrand APROVA completo**, e a **correção anti-IDOR base** (`21d7579`: guardas + upload 400). HEAD ~`21d7579`.
 - **`claude/pagador-fluxo-pagamentos`** → PR **#9**. Fluxo de pagamentos: categorias, recorrência, alçada, **endurecimento de segurança**, frontend de pagamentos, agendador in-process, gancho `FinanceParams`. HEAD `fe27e71`. **79/79 testes, e2e 52/52.**
-- **`claude/fase0-organizacao`** → PR **#10** (base→deploy-v1). Fase 0. **106 testes, e2e 35/35.**
+- **`claude/fase0-organizacao`** → PR **#10** (base→deploy-v1). Fase 0. **108 testes, e2e 35/35.**
 - Branch de tarefa do designado é mesclada (ff) na branch da fase pelo Maestro após verificação.
 
 ## 4. Decisões de negócio confirmadas (CEO)

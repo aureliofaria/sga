@@ -173,8 +173,11 @@ router.post('/:id/complete', authenticate, async (req: AuthRequest, res: Respons
         data: { status: 'COMPLETED', completedAt: new Date(), notes },
       });
       if (isFunctionStep) {
+        // Concluída a tarefa de função, o trabalho da etapa está feito: cancela
+        // TODAS as outras irmãs ativas (PENDING e IN_PROGRESS) — não só as
+        // pendentes — para não deixar uma tarefa assumida em paralelo "presa".
         await tx.requestTask.updateMany({
-          where: { requestId: t.requestId, stepId: t.stepId, status: 'PENDING', id: { not: t.id } },
+          where: { requestId: t.requestId, stepId: t.stepId, status: { in: ['PENDING', 'IN_PROGRESS'] }, id: { not: t.id } },
           data: { status: 'CANCELLED' },
         });
       }
@@ -212,13 +215,21 @@ router.post('/:id/claim', authenticate, async (req: AuthRequest, res: Response) 
       res.status(403).json({ error: 'Esta tarefa não está atribuída a você' }); return;
     }
 
-    const claimed = await prisma.$transaction(async (tx) => {
-      // Guarda otimista: só assume se ainda estiver PENDING.
+    const result = await prisma.$transaction(async (tx) => {
+      // Fila de DONO ÚNICO: se uma irmã já foi assumida/concluída, a fila está
+      // tomada — ninguém mais assume (evita trabalho paralelo desperdiçado).
+      const taken = await tx.requestTask.findFirst({
+        where: { requestId: task.requestId, stepId: task.stepId, status: { in: ['IN_PROGRESS', 'COMPLETED'] }, id: { not: task.id } },
+        select: { id: true },
+      });
+      if (taken) return 'TAKEN';
+
+      // Guarda otimista: só assume se a própria linha ainda estiver PENDING.
       const upd = await tx.requestTask.updateMany({
         where: { id: task.id, status: 'PENDING' },
         data: { status: 'IN_PROGRESS' },
       });
-      if (upd.count === 0) return false;
+      if (upd.count === 0) return 'NOT_PENDING';
 
       // Cancela as irmãs PENDING da mesma (requestId, stepId) — padrão do fan-out.
       await tx.requestTask.updateMany({
@@ -236,10 +247,11 @@ router.post('/:id/claim', authenticate, async (req: AuthRequest, res: Response) 
         },
       });
       await notify(tx, { userId: req.user.id, type: 'TASK_CLAIMED', title: 'Tarefa assumida', body: `Você assumiu a tarefa "${task.title}".`, requestId: task.requestId });
-      return true;
+      return 'OK';
     });
 
-    if (!claimed) { res.status(409).json({ error: 'Tarefa já foi assumida' }); return; }
+    if (result === 'TAKEN') { res.status(409).json({ error: 'Esta fila já foi assumida por outro responsável' }); return; }
+    if (result === 'NOT_PENDING') { res.status(409).json({ error: 'Tarefa já foi assumida' }); return; }
 
     // Ponto de integração futuro com o ERP (no-op hoje).
     await publishWorkflowEvent('TASK_CLAIMED', task.requestId, { taskId: task.id, userId: req.user.id });
