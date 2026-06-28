@@ -112,6 +112,8 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
         resources: { include: { resourceItem: { include: { sector: { select: { id: true, name: true } } } }, asset: { include: { item: { select: { name: true } } } } } },
         fieldValues: { include: { field: true } },
         checklistItems: { include: { item: true } },
+        // Subfluxo (Fase 0 · Passo 9): expõe os filhos vinculados com dados mínimos.
+        children: { select: { id: true, title: true, status: true, flow: { select: { type: true } } } },
       },
     });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
@@ -166,7 +168,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { flowId, title, description, targetEmployee, targetDepartment, startDate,
             amountCents, supplier, costCenter, justification, vacancyType, replacementName,
-            resourceIds } = req.body;
+            resourceIds, parentRequestId } = req.body;
     if (!flowId || !title) { res.status(400).json({ error: 'Fluxo e título são obrigatórios' }); return; }
     const amount = parseCents(amountCents);
     if (!amount.ok) { res.status(400).json({ error: 'Valor (amountCents) inválido' }); return; }
@@ -177,6 +179,32 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
     if (!canOpenRequestType(req.user, flow.type)) {
       res.status(403).json({ error: 'Você não tem permissão para abrir este tipo de solicitação' });
       return;
+    }
+
+    // Subfluxo: verifica o pai se informado (Fase 0 · Passo 9).
+    let resolvedParentId: string | null = null;
+    let parentRecord: any = null;
+    if (parentRequestId) {
+      parentRecord = await prisma.request.findUnique({
+        where: { id: parentRequestId as string },
+        select: {
+          id: true,
+          title: true,
+          currentStep: true,
+          initiatorId: true,
+          tasks: { select: { assigneeId: true } },
+          approvals: { select: { approverId: true } },
+          flow: { select: { type: true } },
+        },
+      });
+      if (!parentRecord) {
+        res.status(404).json({ error: 'Solicitação pai não encontrada' }); return;
+      }
+      const canSee = await canViewRequest(req.user, parentRecord);
+      if (!canSee) {
+        res.status(403).json({ error: 'Sem acesso à solicitação pai' }); return;
+      }
+      resolvedParentId = parentRecord.id as string;
     }
 
     const request = await prisma.request.create({
@@ -196,6 +224,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         justification,
         vacancyType: vacancyType || null,
         replacementName: replacementName || null,
+        parentRequestId: resolvedParentId,
       },
     });
 
@@ -219,6 +248,28 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         details: `Solicitação criada: ${title}`,
       },
     });
+
+    // Protocolo de retorno automático no pai (Fase 0 · Passo 9):
+    // registra AuditLog + Comment no pai indicando abertura do subfluxo.
+    if (resolvedParentId && parentRecord) {
+      await prisma.auditLog.create({
+        data: {
+          requestId: resolvedParentId,
+          userId: req.user.id,
+          userName: req.user.name,
+          action: 'SUBFLOW_OPENED',
+          details: JSON.stringify({ childId: request.id, childTitle: title, childType: flow.type }),
+        },
+      });
+      await prisma.comment.create({
+        data: {
+          requestId: resolvedParentId,
+          stepOrder: parentRecord.currentStep as number,
+          authorId: req.user.id,
+          body: `Subfluxo aberto: "${title}" (protocolo ${request.id})`,
+        },
+      });
+    }
 
     await createRequestTasks(request.id, flowId, 0);
 

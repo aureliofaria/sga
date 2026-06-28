@@ -211,6 +211,11 @@ model Request {
   justification    String?
   vacancyType      String?
   replacementName  String?
+  // Subfluxo pai↔filho (Fase 0 · Passo 9): vínculo opcional com a solicitação
+  // que originou esta (ex.: vaga → compra). SetNull para não cascatear exclusões.
+  parentRequestId  String?
+  parent           Request?          @relation("RequestParentChild", fields: [parentRequestId], references: [id], onDelete: SetNull)
+  children         Request[]         @relation("RequestParentChild")
   tasks            RequestTask[]
   resources        RequestResource[]
   attachments      Attachment[]
