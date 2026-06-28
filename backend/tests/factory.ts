@@ -25,8 +25,10 @@ export async function resetDb() {
   await prisma.approval.deleteMany();
   await prisma.requestTask.deleteMany();
   await prisma.requestResource.deleteMany();
+  await prisma.requestFieldValue.deleteMany();
   await prisma.request.deleteMany();
   await prisma.authorizationLevel.deleteMany();
+  await prisma.formField.deleteMany();
   await prisma.flowStep.deleteMany();
   await prisma.flowTemplate.deleteMany();
   await prisma.resourceItem.deleteMany();

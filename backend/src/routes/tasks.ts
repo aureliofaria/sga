@@ -52,6 +52,10 @@ router.post('/batch-complete', authenticate, async (req: AuthRequest, res: Respo
           skipped.push({ id: taskId, reason: 'anexo obrigatório ausente' });
           continue;
         }
+        if ((await requiredFieldsUnmet(existing.stepId, existing.requestId)).length > 0) {
+          skipped.push({ id: taskId, reason: 'campos obrigatórios não preenchidos' });
+          continue;
+        }
         const task = await prisma.requestTask.update({
           where: { id: taskId },
           data: { status: 'COMPLETED', completedAt: new Date(), notes },
@@ -126,6 +130,23 @@ async function attachmentRequirementUnmet(stepId: string, taskId: string, reques
   return count === 0;
 }
 
+// Verifica se há FormFields OBRIGATÓRIOS da etapa sem RequestFieldValue gravado
+// para a solicitação. Espelha attachmentRequirementUnmet. Retorna a lista de
+// `key`s pendentes (vazia quando o requisito foi atendido) — Passo 7.
+async function requiredFieldsUnmet(stepId: string, requestId: string): Promise<string[]> {
+  const required = await prisma.formField.findMany({
+    where: { flowStepId: stepId, required: true },
+    select: { id: true, key: true },
+  });
+  if (required.length === 0) return [];
+  const filled = await prisma.requestFieldValue.findMany({
+    where: { requestId, fieldId: { in: required.map((f) => f.id) }, NOT: { value: '' } },
+    select: { fieldId: true },
+  });
+  const filledIds = new Set(filled.map((v) => v.fieldId));
+  return required.filter((f) => !filledIds.has(f.id)).map((f) => f.key);
+}
+
 // Garante que a tarefa pertence ao usuário (ou que ele é ADMIN). Retorna a tarefa
 // ou envia a resposta de erro apropriada e devolve null.
 async function loadOwnedTask(req: AuthRequest, res: Response) {
@@ -158,6 +179,10 @@ router.post('/:id/complete', authenticate, async (req: AuthRequest, res: Respons
     if (!owned) return;
     if (await attachmentRequirementUnmet(owned.stepId, owned.id, owned.requestId)) {
       res.status(400).json({ error: 'Esta etapa exige pelo menos um anexo antes da conclusão' }); return;
+    }
+    const missing = await requiredFieldsUnmet(owned.stepId, owned.requestId);
+    if (missing.length > 0) {
+      res.status(400).json({ error: 'Há campos obrigatórios não preenchidos nesta etapa', missing }); return;
     }
     const { notes } = req.body;
     // Concluir implica assumir (Passo 6 — REF.2): se a etapa é de FUNÇÃO (fila),

@@ -126,7 +126,48 @@ model FlowStep {
   collectsResources  Boolean              @default(false)
   authLevels         AuthorizationLevel[]
   tasks              RequestTask[]
+  formFields         FormField[]
   createdAt          DateTime             @default(now())
+}
+
+// ===========================================================================
+// Campos dinâmicos por etapa (Fase 0 · Passo 7) — definição (FormField) e
+// valores preenchidos por solicitação (RequestFieldValue). O gancho de PII é o
+// `sensitiveType`: quando setado, o valor é mascarado na leitura conforme a
+// política do Passo 4 (fieldMasking.ts).
+// ===========================================================================
+
+model FormField {
+  id            String              @id @default(cuid())
+  flowStepId    String
+  flowStep      FlowStep            @relation(fields: [flowStepId], references: [id], onDelete: Cascade)
+  key           String // snake_case, único na etapa
+  label         String
+  type          String // TEXT|TEXTAREA|NUMBER|DATE|SELECT|EMAIL|CPF|RG|MONEY|PHONE
+  required      Boolean             @default(false)
+  options       String? // JSON array p/ SELECT
+  order         Int                 @default(0)
+  sensitiveType String? // SensitiveType ('CPF'|'RG'|'SALARY'|'EMAIL_PERSONAL'|'PHONE_PERSONAL') — gancho do mascaramento
+  values        RequestFieldValue[]
+  createdAt     DateTime            @default(now())
+
+  @@unique([flowStepId, key])
+  @@index([flowStepId])
+}
+
+model RequestFieldValue {
+  id        String    @id @default(cuid())
+  requestId String
+  request   Request   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  fieldId   String
+  field     FormField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  value     String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([requestId, fieldId])
+  @@index([requestId])
+  @@index([fieldId])
 }
 
 model AuthorizationLevel {
@@ -174,6 +215,7 @@ model Request {
   assetMovements   AssetMovement[]
   comments         Comment[]
   notifications    Notification[]
+  fieldValues      RequestFieldValue[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 }

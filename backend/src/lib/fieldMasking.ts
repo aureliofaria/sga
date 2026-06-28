@@ -158,6 +158,58 @@ export function maskFields<T extends Record<string, any>>(
   return { masked, revealed };
 }
 
+// --- Mascaramento de VALORES DE CAMPOS DINÂMICOS (Passo 7) ------------------
+
+// Forma mínima de um RequestFieldValue com o FormField incluído. Aceitamos um
+// tipo estrutural (não o tipo gerado do Prisma) para manter o módulo desacoplado
+// do client e facilmente testável.
+export interface DynamicFieldValue {
+  value: string;
+  field: { key: string; sensitiveType?: string | null };
+  // Demais colunas (id, requestId, ...) são preservadas via genérico.
+  [k: string]: any;
+}
+
+// ATIVAÇÃO DO MASCARAMENTO (ponto LGPD-crítico do Passo 7).
+// Para cada valor cujo `field.sensitiveType` está setado:
+//  • se o tipo ∈ `allowed` → mantém o valor e registra a revelação (auditoria);
+//  • senão → substitui `value` por `maskValue(sensitiveType, value)`.
+// Valores sem `sensitiveType` NUNCA são tocados. Ao fim, grava o AuditLog de
+// acesso sensível (o `field` no details = o `key` do FormField). Devolve a
+// lista de valores (mascarados quando for o caso) — CÓPIAS, sem mutar o original.
+//
+// `allowed` é opcional: quando não informado, resolve uma vez via
+// resolveViewerSensitiveAccess (REF.3 permite injetar para evitar 2ª consulta).
+export async function maskDynamicFieldValues<T extends DynamicFieldValue>(
+  user: { id: string; name?: string | null; role?: string | null },
+  fieldValues: T[],
+  db: Db = prisma,
+  allowed?: Set<SensitiveType>
+): Promise<T[]> {
+  const allow = allowed ?? (await resolveViewerSensitiveAccess(user, db));
+  const revealed: Array<{ field: string; type: SensitiveType }> = [];
+
+  const out = fieldValues.map((fv) => {
+    const st = fv.field?.sensitiveType as SensitiveType | null | undefined;
+    if (!st) return fv; // campo não sensível: intacto.
+    if (allow.has(st)) {
+      // Liberado: mantém intacto e registra a revelação (key do FormField).
+      revealed.push({ field: fv.field.key, type: st });
+      return fv;
+    }
+    // Sem permissão: substitui o valor pela máscara por tipo (cópia rasa).
+    return { ...fv, value: maskValue(st, fv.value) };
+  });
+
+  // Requeremos um requestId para auditar. Todos os valores de uma mesma
+  // listagem pertencem à mesma Request; pegamos o primeiro disponível.
+  const requestId = (fieldValues[0] as any)?.requestId;
+  if (requestId) {
+    await recordSensitiveAccess(db, { user, requestId, revealed });
+  }
+  return out;
+}
+
 // --- Auditoria de acesso (LGPD) ---------------------------------------------
 
 // Grava UM AuditLog 'SENSITIVE_VIEW' quando o espectador efetivamente vê campos

@@ -14,7 +14,9 @@ import {
   resolveViewerSensitiveAccess,
   maskFields,
   recordSensitiveAccess,
+  maskDynamicFieldValues,
 } from '../lib/fieldMasking';
+import { validateFieldValue } from '../lib/fieldValidation';
 
 const router = Router();
 
@@ -38,16 +40,19 @@ export function applyMaskWithRegistry<T extends Record<string, any>>(
   return maskFields(record, registry as Partial<Record<keyof T, SensitiveType>>, allowed);
 }
 
-// Serializa uma Request para o espectador: resolve os tipos liberados, mascara
-// os campos sensíveis registrados, audita o que foi revelado e devolve a cópia
-// mascarada. Com o registro vazio é um no-op (não muta, não audita).
+// Serializa uma Request para o espectador: mascara os campos sensíveis de 1ª
+// classe registrados, audita o que foi revelado e devolve a cópia mascarada.
+// Com o registro vazio é um no-op (não muta, não audita).
+// REF.3: aceita `allowed` opcional — o chamador resolve o acesso UMA vez e o
+// injeta aqui e em maskDynamicFieldValues, evitando uma 2ª consulta de SectorMember.
 export async function maskRequestForViewer<T extends { id: string }>(
   user: { id: string; name?: string | null; role?: string | null },
   request: T,
-  db = prisma
+  db = prisma,
+  allowed?: Set<SensitiveType>
 ): Promise<T> {
-  const allowed = await resolveViewerSensitiveAccess(user, db);
-  const { masked, revealed } = applyMaskWithRegistry(request, REQUEST_SENSITIVE_FIELDS, allowed);
+  const allow = allowed ?? (await resolveViewerSensitiveAccess(user, db));
+  const { masked, revealed } = applyMaskWithRegistry(request, REQUEST_SENSITIVE_FIELDS, allow);
   await recordSensitiveAccess(db, { user, requestId: request.id, revealed });
   return masked;
 }
@@ -94,11 +99,17 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
         approvals: { include: { approver: { select: { id: true, name: true, role: true } } }, orderBy: { createdAt: 'desc' } },
         auditLogs: { orderBy: { createdAt: 'asc' } },
         resources: { include: { resourceItem: { include: { sector: { select: { id: true, name: true } } } }, asset: { include: { item: { select: { name: true } } } } } },
+        fieldValues: { include: { field: true } },
       },
     });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
     if (!(await canViewRequest(req.user, request))) { res.status(403).json({ error: 'Acesso negado' }); return; }
-    res.json(await maskRequestForViewer(req.user, request));
+    // REF.3: resolve o acesso sensível UMA vez e injeta nos dois mascaramentos
+    // (campos de 1ª classe da Request + valores dinâmicos do Passo 7).
+    const allowed = await resolveViewerSensitiveAccess(req.user, prisma);
+    const masked = await maskRequestForViewer(req.user, request, prisma, allowed);
+    masked.fieldValues = await maskDynamicFieldValues(req.user, request.fieldValues, prisma, allowed);
+    res.json(masked);
   } catch {
     res.status(500).json({ error: 'Erro ao buscar solicitação' });
   }
@@ -593,6 +604,84 @@ router.post('/:id/resubmit', authenticate, async (req: AuthRequest, res: Respons
     res.json(updated);
   } catch {
     res.status(500).json({ error: 'Erro ao reenviar solicitação' });
+  }
+});
+
+// ===========================================================================
+// Gravação de valores de campos dinâmicos por etapa (Fase 0 · Passo 7).
+// Body: { stepOrder, values: [{ fieldId, value }] }. Autorização: ADMIN ou
+// quem é assignee de uma tarefa da etapa (status PENDING/IN_PROGRESS). Cada
+// valor é validado por tipo (tolerante — REF.2) e gravado via upsert
+// (@@unique[requestId,fieldId]). Valor de campo com `sensitiveType` setado gera
+// AuditLog 'SENSITIVE_FIELD_WRITTEN'. O valor é armazenado como enviado (trim).
+// ===========================================================================
+router.post('/:id/fields', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { stepOrder, values } = req.body as { stepOrder?: number; values?: Array<{ fieldId?: string; value?: unknown }> };
+    if (typeof stepOrder !== 'number') { res.status(400).json({ error: 'stepOrder é obrigatório' }); return; }
+    if (!Array.isArray(values) || values.length === 0) { res.status(400).json({ error: 'values deve ser um array não vazio' }); return; }
+
+    const request = await prisma.request.findUnique({
+      where: { id: req.params.id },
+      include: { flow: { include: { steps: { where: { order: stepOrder }, include: { formFields: true } } } } },
+    });
+    if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
+
+    const step = request.flow.steps[0];
+    if (!step) { res.status(404).json({ error: 'Etapa não encontrada' }); return; }
+
+    // Autorização: ADMIN ou assignee de uma tarefa ABERTA (PENDING/IN_PROGRESS)
+    // daquela etapa. Tarefa concluída/cancelada não concede acesso de escrita.
+    if (req.user.role !== 'ADMIN') {
+      const openTask = await prisma.requestTask.count({
+        where: { requestId: request.id, assigneeId: req.user.id, stepId: step.id, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+      });
+      if (openTask === 0) { res.status(403).json({ error: 'Acesso negado: você não tem tarefa aberta nesta etapa' }); return; }
+    }
+
+    // Mapa fieldId -> FormField (só campos DESTA etapa são aceitos).
+    const fieldsById = new Map(step.formFields.map((f) => [f.id, f]));
+
+    // Pré-valida tudo ANTES de gravar (transação tudo-ou-nada).
+    const prepared: Array<{ fieldId: string; value: string; sensitiveType: string | null; key: string }> = [];
+    for (const item of values) {
+      if (!item || typeof item.fieldId !== 'string') { res.status(400).json({ error: 'Cada valor exige fieldId' }); return; }
+      const field = fieldsById.get(item.fieldId);
+      if (!field) { res.status(400).json({ error: `Campo ${item.fieldId} não pertence a esta etapa` }); return; }
+      const value = item.value == null ? '' : String(item.value).trim();
+      const check = validateFieldValue(field.type, value);
+      if (!check.ok) { res.status(400).json({ error: `Campo "${field.label}": ${check.error}` }); return; }
+      prepared.push({ fieldId: field.id, value, sensitiveType: field.sensitiveType, key: field.key });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      for (const p of prepared) {
+        await tx.requestFieldValue.upsert({
+          where: { requestId_fieldId: { requestId: request.id, fieldId: p.fieldId } },
+          update: { value: p.value },
+          create: { requestId: request.id, fieldId: p.fieldId, value: p.value },
+        });
+        // Gravação de valor de campo sensível: registra auditoria LGPD (sem o valor).
+        if (p.sensitiveType) {
+          await tx.auditLog.create({
+            data: {
+              requestId: request.id,
+              userId: req.user.id,
+              userName: req.user.name,
+              action: 'SENSITIVE_FIELD_WRITTEN',
+              details: JSON.stringify({ field: p.key, type: p.sensitiveType }),
+            },
+          });
+        }
+      }
+    });
+
+    const saved = await prisma.requestFieldValue.findMany({
+      where: { requestId: request.id, fieldId: { in: prepared.map((p) => p.fieldId) } },
+    });
+    res.json(saved);
+  } catch {
+    res.status(500).json({ error: 'Erro ao gravar valores de campos' });
   }
 });
 
