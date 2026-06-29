@@ -20,7 +20,7 @@ Sistema de gestão de aprovações e fluxos (admissão/onboarding, offboarding, 
 ## 3. Branches, PRs e o que contêm
 - **`claude/deploy-v1-2g02g7`** → PR **#8** (base→main). Pacote de deploy (DEPLOY.md, launcher de 1 clique, seed prod seguro), **rebrand APROVA completo**, e a **correção anti-IDOR base** (`21d7579`: guardas + upload 400). HEAD ~`21d7579`.
 - **`claude/pagador-fluxo-pagamentos`** → PR **#9**. Fluxo de pagamentos: categorias, recorrência, alçada, **endurecimento de segurança**, frontend de pagamentos, agendador in-process, gancho `FinanceParams`. HEAD `fe27e71`. **79/79 testes, e2e 52/52.**
-- **`claude/fase0-organizacao`** → PR **#10** (base→deploy-v1). Fase 0 **COMPLETA (13/13)**. **259 testes, e2e 35/35.**
+- **`claude/fase0-organizacao`** → PR **#10** (base→deploy-v1). Fase 0 **COMPLETA (13/13)** + **Fase 1 espinha dorsal** (trilha onboarding 1→11, config-only). **266 testes, smoke e2e 35/35, e2e-onboarding 22/22 (ponta a ponta).**
 - Branch de tarefa do designado é mesclada (ff) na branch da fase pelo Maestro após verificação.
 
 ## 4. Decisões de negócio confirmadas (CEO)
@@ -34,7 +34,8 @@ Sistema de gestão de aprovações e fluxos (admissão/onboarding, offboarding, 
 
 ## 5. Progresso
 **Fase 0 (PR #10):** ✅1 papéis+20 setores · ✅2 hierarquia (Líder I/II/Membro + suplência) · ✅3 visibilidade (IDOR de leitura FECHADO) · ✅4 mascaramento CPF/RG/salário (LGPD: motor+política+auditoria; *no-op* até o Passo 7) · ✅5 ações de aprovação ricas (decision/resubmit + rounds; FORWARD só p/ alçada/Diretoria) · ✅6 filas de função (fan-out + claim; fallback Membro→Líder II→Líder I) · ✅7 campos dinâmicos (FormField/RequestFieldValue; ATIVA o mascaramento LGPD do P4) · ✅8 subtarefas/checklist (condicional + gating; `applicable` server-side) · ✅9 subfluxo pai↔filho (parentRequestId + protocolo; sem auto-gating) · ✅10 status customizados (statusLabel denormalizado) · ✅11 escalonamento temporal (estágios 2/3/7d + justificativa; líder p/ level LIDER_1) · ✅12 Parâmetros Financeiros (teto/consumo/override + decidePaymentRouting) · ✅13 suplência (gestão da delegação + efetiva no gate financeiro). **FASE 0 COMPLETA.**
-**Pagamentos (PR #9):** backend+frontend+scheduler entregues. Pendente: edição completa de recorrência na UI; ligar FinanceParams real (depende da Fase 0); etapa inicial de aprovação do líder.
+**Fase 1 — Trilha de Onboarding (espinha dorsal, PR #10):** ✅ trilha 1→11 montada por CONFIGURAÇÃO (seed `seedOnboardingFlow`) sobre os primitivos da Fase 0 — branch nova-vaga(Diretoria)/substituição(RH direto), etapas paralelas (40: TI∥ADM; 70: TI∥SISTEMAS∥ADM∥DADOS), campos PII mascarados (CPF/RG), checklists condicionais, statusLabels. Fila de função tornada **precisa por função** (setor multifunção TI/DADOS/SISTEMAS). E2E ponta a ponta 22/22. **Pendente da trilha:** ramos de devolução completos (2.1/2.2), condicional fina de step (DADOS só se PowerBI), e o **FRONTEND** das telas. *(Subfluxo de compra na etapa 5 = disparo manual já suportado.)*
+**Pagamentos (PR #9):** backend+frontend+scheduler entregues. Pendente: edição completa de recorrência na UI; ligar FinanceParams real (`decidePaymentRouting` já existe na Fase 0); etapa inicial de aprovação do líder.
 **Prioridades de lançamento:** 1) requisição de vaga + trilha completa de onboarding · 2) compra (subfluxo) + pagamento · 3) offboarding · 4) inventário conectado.
 
 ## 6. Segurança
