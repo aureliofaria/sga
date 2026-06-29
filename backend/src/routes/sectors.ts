@@ -175,6 +175,109 @@ router.put('/:id/members/:memberId', authenticate, requireRole('ADMIN'), async (
   }
 });
 
+// ---------------------------------------------------------------------------
+// Suplência / delegação do Líder I (Fase 0 · Passo 13)
+//
+// A delegação vive na LINHA do Líder I do setor: delegateToId aponta para a
+// linha (SectorMember) do Líder II suplente e delegateUntil é o fim do período.
+// A visibilidade por suplência (lib/visibility.ts) e o gate financeiro
+// (lib/financeParams.ts) consomem esses campos enquanto delegateUntil > agora.
+//
+// Auditoria: AuditLog exige requestId (FK obrigatória) e a delegação não tem
+// Request associado; criar tabela nova só para isto foi descartado (orientação
+// do passo). Registramos uma trilha estruturada via console.info (DELEGATION_SET
+// / DELEGATION_CLEARED) com userId/setor/suplente/prazo. A resposta devolve o
+// estado da delegação para confirmação.
+//
+// FOLLOW-UP (extensão futura, NÃO implementado aqui): a suplência ainda não
+// redireciona o ESCALONAMENTO temporal (Passo 11 escala ao titular LIDER_1) nem
+// o FALLBACK de fila (Passo 6). Esses pontos continuam mirando o titular.
+// ---------------------------------------------------------------------------
+
+// Autoriza o chamador a gerir a delegação do setor: ADMIN OU o Líder I (LIDER_1)
+// do próprio setor. Retorna a linha do Líder I do setor (ou null se não há).
+async function resolveDelegationAuth(
+  req: AuthRequest,
+  sectorId: string
+): Promise<{ authorized: boolean; lider1: { id: string; userId: string } | null }> {
+  const lider1 = await prisma.sectorMember.findFirst({
+    where: { sectorId, level: 'LIDER_1' },
+    select: { id: true, userId: true },
+  });
+  const isAdmin = req.user?.role === 'ADMIN';
+  const isLider1 = lider1 != null && lider1.userId === req.user!.id;
+  return { authorized: isAdmin || isLider1, lider1 };
+}
+
+// PUT /:sectorId/delegation — define a suplência. Body { delegateUserId, until }.
+router.put('/:sectorId/delegation', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { sectorId } = req.params;
+    const { authorized, lider1 } = await resolveDelegationAuth(req, sectorId);
+    if (!authorized) { res.status(403).json({ error: 'Apenas o Líder I do setor ou um ADMIN podem gerir a suplência' }); return; }
+    if (!lider1) { res.status(400).json({ error: 'O setor não possui um Líder I para delegar' }); return; }
+
+    const { delegateUserId, until } = req.body ?? {};
+    if (!delegateUserId) { res.status(400).json({ error: 'delegateUserId é obrigatório' }); return; }
+    if (delegateUserId === lider1.userId) { res.status(400).json({ error: 'O suplente deve ser um Líder II do mesmo setor' }); return; }
+
+    // until deve ser data futura válida.
+    const untilDate = until ? new Date(until) : null;
+    if (!untilDate || Number.isNaN(untilDate.getTime()) || untilDate.getTime() <= Date.now()) {
+      res.status(400).json({ error: 'until deve ser uma data futura válida' }); return;
+    }
+
+    // O suplente deve ser um Líder II do MESMO setor.
+    const suplente = await prisma.sectorMember.findFirst({
+      where: { sectorId, userId: delegateUserId, level: 'LIDER_2' },
+      select: { id: true },
+    });
+    if (!suplente) { res.status(400).json({ error: 'O suplente deve ser um Líder II do mesmo setor' }); return; }
+
+    const updated = await prisma.sectorMember.update({
+      where: { id: lider1.id },
+      data: { delegateToId: suplente.id, delegateUntil: untilDate },
+      select: { id: true, sectorId: true, delegateToId: true, delegateUntil: true },
+    });
+
+    // Trilha de auditoria estruturada (sem requestId — ver nota acima).
+    console.info('[AUDIT] DELEGATION_SET', JSON.stringify({
+      action: 'DELEGATION_SET', sectorId, lider1MemberId: lider1.id,
+      delegateMemberId: suplente.id, delegateUserId, until: untilDate.toISOString(),
+      byUserId: req.user!.id, at: new Date().toISOString(),
+    }));
+
+    res.json({ sectorId: updated.sectorId, delegateToId: updated.delegateToId, delegateUntil: updated.delegateUntil });
+  } catch {
+    res.status(500).json({ error: 'Erro ao definir suplência' });
+  }
+});
+
+// DELETE /:sectorId/delegation — limpa a suplência na linha do Líder I.
+router.delete('/:sectorId/delegation', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { sectorId } = req.params;
+    const { authorized, lider1 } = await resolveDelegationAuth(req, sectorId);
+    if (!authorized) { res.status(403).json({ error: 'Apenas o Líder I do setor ou um ADMIN podem gerir a suplência' }); return; }
+    if (!lider1) { res.status(400).json({ error: 'O setor não possui um Líder I' }); return; }
+
+    const updated = await prisma.sectorMember.update({
+      where: { id: lider1.id },
+      data: { delegateToId: null, delegateUntil: null },
+      select: { sectorId: true, delegateToId: true, delegateUntil: true },
+    });
+
+    console.info('[AUDIT] DELEGATION_CLEARED', JSON.stringify({
+      action: 'DELEGATION_CLEARED', sectorId, lider1MemberId: lider1.id,
+      byUserId: req.user!.id, at: new Date().toISOString(),
+    }));
+
+    res.json({ sectorId: updated.sectorId, delegateToId: updated.delegateToId, delegateUntil: updated.delegateUntil });
+  } catch {
+    res.status(500).json({ error: 'Erro ao remover suplência' });
+  }
+});
+
 // Usuários disponíveis para adicionar ao setor
 router.get('/:id/available-users', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {

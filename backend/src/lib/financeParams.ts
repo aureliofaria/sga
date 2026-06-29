@@ -22,8 +22,14 @@ const FINANCE_SECTOR_NAME = 'Financeiro';
 /**
  * Pode EDITAR parâmetros financeiros (teto, override, exclusão)?
  *
- * true se o papel global está em FINANCE_PARAM_EDITORS (ADMIN, DIRETORIA) OU se
- * o usuário é SectorMember de nível 'LIDER_1' do setor 'Financeiro'.
+ * true se:
+ *  • o papel global está em FINANCE_PARAM_EDITORS (ADMIN, DIRETORIA); OU
+ *  • o usuário é SectorMember de nível 'LIDER_1' do setor 'Financeiro'; OU
+ *  • o usuário é Líder II do 'Financeiro' com SUPLÊNCIA VIGENTE — existe um
+ *    SectorMember LIDER_1 do Financeiro cujo delegateToId aponta para a linha
+ *    do usuário e delegateUntil > agora (mesmo padrão de visibility.ts).
+ *
+ * Suplência efetiva (Fase 0 · Passo 13).
  */
 export async function canEditFinanceParams(user: { id: string; role: string }, db: Db = prisma): Promise<boolean> {
   if ((FINANCE_PARAM_EDITORS as readonly string[]).includes(user.role)) return true;
@@ -31,7 +37,27 @@ export async function canEditFinanceParams(user: { id: string; role: string }, d
   const membership = await db.sectorMember.findFirst({
     where: { userId: user.id, level: 'LIDER_1', sector: { name: FINANCE_SECTOR_NAME } },
   });
-  return membership != null;
+  if (membership != null) return true;
+
+  // Suplência: linhas de filiação do usuário no Financeiro; se alguma delas é
+  // alvo de uma delegação vigente vinda do Líder I do Financeiro, pode editar.
+  const myFinanceMemberships = await db.sectorMember.findMany({
+    where: { userId: user.id, sector: { name: FINANCE_SECTOR_NAME } },
+    select: { id: true },
+  });
+  if (myFinanceMemberships.length === 0) return false;
+
+  const now = new Date();
+  const activeDelegation = await db.sectorMember.findFirst({
+    where: {
+      level: 'LIDER_1',
+      sector: { name: FINANCE_SECTOR_NAME },
+      delegateToId: { in: myFinanceMemberships.map((m) => m.id) },
+      delegateUntil: { gt: now },
+    },
+    select: { id: true },
+  });
+  return activeDelegation != null;
 }
 
 /**
