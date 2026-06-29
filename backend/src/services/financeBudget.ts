@@ -14,6 +14,7 @@
 // refinamento futuro deliberadamente adiado nesta versão.
 // ============================================================================
 
+import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 
 export interface BudgetResult {
@@ -25,7 +26,7 @@ export interface BudgetResult {
   hasParam: boolean;
 }
 
-type Db = typeof prisma;
+type Db = Prisma.TransactionClient | typeof prisma;
 
 /**
  * Calcula o orçamento (teto, consumido, saldo) de um setor em um mês.

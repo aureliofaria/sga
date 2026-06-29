@@ -78,6 +78,16 @@ async function main() {
       });
       console.log('Hierarquia de setor de demonstração criada (Líder I/II/Membro em TI, Dados e Infra)');
     }
+
+    // Carlos (financeiro) como Líder I do setor 'Financeiro' — dá destinatário ao
+    // roteamento de pagamento (decidePaymentRouting): fila do Financeiro e Líder I.
+    const setorFin = await prisma.sector.findFirst({ where: { name: 'Financeiro' } });
+    if (setorFin) {
+      await prisma.sectorMember.create({
+        data: { sectorId: setorFin.id, userId: carlosFinanceiro.id, role: 'LIDER', level: 'LIDER_1' },
+      });
+      console.log('Carlos vinculado como Líder I do setor Financeiro (roteamento de pagamento)');
+    }
   }
 
   // Catálogo de inventário (recursos alocáveis em admissões / devolvidos em desligamentos)
@@ -211,6 +221,10 @@ async function main() {
     ],
   });
 
+  // handlingSector = Financeiro marca esta etapa como ROTEAMENTO FINANCEIRO:
+  // createRequestTasks chama decidePaymentRouting (teto/saldo do setor do pedido)
+  // e roteia para a fila do Financeiro (Membro) ou para o Líder I do Financeiro.
+  const financeiroSector = await prisma.sector.findFirst({ where: { name: 'Financeiro' } });
   await prisma.flowStep.create({
     data: {
       flowTemplateId: pagamentoFlow.id,
@@ -218,6 +232,7 @@ async function main() {
       name: 'Processamento Financeiro',
       description: 'Processamento e efetivação do pagamento',
       requiredRole: 'FINANCE',
+      handlingSectorId: financeiroSector?.id ?? null,
       requiresAttachment: true,
       deadlineHours: 48,
     },

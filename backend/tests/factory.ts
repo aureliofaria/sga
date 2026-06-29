@@ -63,6 +63,8 @@ interface StepSpec {
   activateOnSectorId?: string | null;
   // Fase 0 · Passo 10: rótulo de exibição opcional para a etapa.
   statusLabel?: string | null;
+  // Ramo de devolução: order para onde a correção devolve (null = própria etapa).
+  returnStepOrder?: number | null;
   // Fase 0 · Passo 11: setor que trata a etapa (resolução do Líder I) e overrides
   // opcionais da cadência de escalonamento.
   handlingSectorId?: string | null;
@@ -85,6 +87,7 @@ export async function makeFlow(type: string, steps: StepSpec[]) {
         conditions: s.conditions ? JSON.stringify(s.conditions) : null,
         activateOnSectorId: s.activateOnSectorId ?? null,
         statusLabel: s.statusLabel ?? null,
+        returnStepOrder: s.returnStepOrder ?? null,
         handlingSectorId: s.handlingSectorId ?? null,
         slaExpiry: s.slaExpiry ?? undefined,
         escalationDay1: s.escalationDay1 ?? null,

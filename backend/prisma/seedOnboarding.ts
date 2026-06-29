@@ -48,6 +48,8 @@ interface StepSpec {
   requiredRole?: string | null;
   handlingSectorName?: string | null;
   statusLabel?: string | null;
+  // Ramo de devolução: order para onde a correção devolve (0 = volta ao solicitante).
+  returnStepOrder?: number | null;
   deadlineHours?: number | null;
   slaExpiry?: string;
   collectsResources?: boolean;
@@ -96,6 +98,8 @@ const STEPS: StepSpec[] = [
     statusLabel: 'Aguardando Diretoria',
     deadlineHours: 48,
     slaExpiry: 'TRANSFER_TO_LEADER',
+    // Devolução: ao solicitar correção, volta ao solicitante (Abertura de Vaga).
+    returnStepOrder: 0,
     conditions: [{ field: 'always', op: 'ALWAYS', value: null, targetOrder: 20 }],
   },
   // order 20 — RH avalia e define prazo.
@@ -106,6 +110,8 @@ const STEPS: StepSpec[] = [
     handlingSectorName: 'RH',
     statusLabel: 'RH avaliando vaga',
     deadlineHours: 24,
+    // Devolução: ao solicitar correção, volta ao solicitante (Abertura de Vaga).
+    returnStepOrder: 0,
     conditions: [{ field: 'always', op: 'ALWAYS', value: null, targetOrder: 30 }],
     formFields: [
       { key: 'expected_start_date', label: 'Data prevista de início', type: 'DATE', required: true },
@@ -289,6 +295,7 @@ export async function seedOnboardingFlow(prisma: Db): Promise<void> {
           requiredRole: spec.requiredRole ?? null,
           handlingSectorId,
           statusLabel: spec.statusLabel ?? null,
+          returnStepOrder: spec.returnStepOrder ?? null,
           deadlineHours: spec.deadlineHours ?? null,
           slaExpiry: spec.slaExpiry ?? undefined,
           collectsResources: spec.collectsResources ?? false,

@@ -221,6 +221,15 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
       resolvedParentId = parentRecord.id as string;
     }
 
+    // Setor do pedido = primeira filiação do iniciador (denormalizado). Alimenta o
+    // orçamento financeiro por setor (computeSectorBudget) e o roteamento de
+    // pagamento (decidePaymentRouting). Null quando o iniciador não tem filiação.
+    const initiatorMembership = await prisma.sectorMember.findFirst({
+      where: { userId: req.user.id },
+      select: { sectorId: true },
+    });
+    const initiatorSectorId = initiatorMembership?.sectorId ?? null;
+
     // Criação atômica: a solicitação, os recursos, a auditoria, o protocolo do
     // subfluxo no pai e as tarefas iniciais vivem na MESMA transação — evita
     // "solicitação fantasma" (criada mas sem tarefas/protocolo) se algo falhar
@@ -238,6 +247,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         data: {
           flowId,
           initiatorId: req.user.id,
+          sectorId: initiatorSectorId,
           title,
           description,
           status: 'IN_PROGRESS',
@@ -479,6 +489,11 @@ async function handleDecision(
 
   const step = request.currentStep;
   const round = await activeRound(prisma, requestId, step);
+  // Ramo de devolução desta etapa: para qual order a correção devolve. Null →
+  // devolve para a própria etapa (padrão Fase 0). Na trilha, etapas de decisão
+  // usam 0 (volta ao solicitante na submissão).
+  const currentStepDef = request.flow.steps.find((s) => s.order === step);
+  const correctionReturnTo = currentStepDef?.returnStepOrder ?? step;
 
   // --- FORWARD: validações específicas do destino ---
   let forwardAssignees: { id: string; name: string }[] = [];
@@ -563,7 +578,7 @@ async function handleDecision(
           data: { status: 'CANCELLED' },
         });
         await tx.comment.create({ data: { requestId, stepOrder: step, authorId: reqUser.id, body: reason } });
-        await tx.request.update({ where: { id: requestId }, data: { status: 'AWAITING_CORRECTION', correctionReturnStep: step } });
+        await tx.request.update({ where: { id: requestId }, data: { status: 'AWAITING_CORRECTION', correctionReturnStep: correctionReturnTo } });
         await tx.auditLog.create({
           data: { requestId, userId: reqUser.id, userName: reqUser.name, action: 'CORRECTION_REQUESTED', details: `Correção solicitada: ${reason}` },
         });

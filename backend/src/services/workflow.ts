@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { notify, notifyMany } from './notifications';
 import { isFunctionRole, resolveQueueEligibles } from '../lib/queue';
+import { decidePaymentRouting } from './financeBudget';
 
 // Aceita tanto o cliente normal quanto um cliente de transação, permitindo que as
 // funções de workflow sejam compostas dentro de uma transação atômica.
@@ -72,6 +73,11 @@ export async function createRequestTasks(requestId: string, flowId: string, step
   const steps = flow.steps.filter(s => s.order === stepOrder);
   if (steps.length === 0) return;
 
+  // Roteamento financeiro (Passo 12 ligado): uma etapa de fluxo PAYMENT cujo
+  // setor de tratamento (handlingSector) é o 'Financeiro' roteia por orçamento —
+  // decidePaymentRouting decide entre a FILA do Financeiro (Membro) e o Líder I.
+  const financeiroSector = await db.sector.findFirst({ where: { name: 'Financeiro' }, select: { id: true } });
+
   let tasksCreated = 0;
 
   for (const step of steps) {
@@ -104,8 +110,55 @@ export async function createRequestTasks(requestId: string, flowId: string, step
     // linha. Papéis legados (MANAGER/FINANCE/HR/USER) seguem o caminho atual.
     const isFunctionStep = isFunctionRole(step.requiredRole);
 
+    // Etapa de ROTEAMENTO FINANCEIRO: fluxo PAYMENT + handlingSector = Financeiro.
+    const isFinanceRoutingStep =
+      flow.type === 'PAYMENT' && financeiroSector != null && step.handlingSectorId === financeiroSector.id;
+
     let assignees: { id: string; name: string }[] = [];
-    if (isSelfSubmissionStep) {
+    if (isFinanceRoutingStep) {
+      // Decide Membro (fila) x Líder I do Financeiro conforme teto/saldo do setor
+      // do pedido no mês de abertura (decidePaymentRouting). Sem teto/saldo → Líder I.
+      const created = request.createdAt instanceof Date ? request.createdAt : new Date(request.createdAt);
+      const routing = await decidePaymentRouting(
+        {
+          sectorId: request.sectorId ?? '',
+          amountCents: request.amountCents ?? 0,
+          year: created.getUTCFullYear(),
+          month: created.getUTCMonth() + 1,
+          // V1: "previsão" tratada como verdadeira; roteamento por teto + saldo.
+          hasForecast: true,
+        },
+        db,
+      );
+      if (routing.target === 'FINANCE_MEMBER') {
+        // Fila da função Financeiro (Membro→Líder II→Líder I; exclui o iniciador).
+        assignees = await resolveQueueEligibles(db, { requiredRole: 'FINANCEIRO' }, request.initiatorId);
+      } else {
+        // Líder I do Financeiro (exclui o iniciador); fallback à fila se não houver.
+        const leaders = await db.sectorMember.findMany({
+          where: {
+            level: 'LIDER_1',
+            sector: { name: 'Financeiro' },
+            userId: { not: request.initiatorId },
+            user: { is: { isActive: true } },
+          },
+          select: { user: { select: { id: true, name: true } } },
+        });
+        assignees = leaders.map(l => l.user).filter((u): u is { id: string; name: string } => u != null);
+        if (assignees.length === 0) {
+          assignees = await resolveQueueEligibles(db, { requiredRole: 'FINANCEIRO' }, request.initiatorId);
+        }
+      }
+      await db.auditLog.create({
+        data: {
+          requestId,
+          userId: request.initiatorId,
+          userName: 'Sistema',
+          action: 'PAYMENT_ROUTED',
+          details: JSON.stringify({ target: routing.target, reason: routing.reason, sectorId: request.sectorId, amountCents: request.amountCents }),
+        },
+      });
+    } else if (isSelfSubmissionStep) {
       // Submissão do iniciador: só o iniciador, sem difundir ao papel inteiro.
       if (initiator) assignees = [initiator];
     } else if (hasAuthLevels) {

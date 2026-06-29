@@ -188,6 +188,34 @@ describe('POST /:id/decision — REQUEST_CORRECTION', () => {
     expect(appr).not.toBeNull();
   });
 
+  it('ramo de devolução: correção numa etapa com returnStepOrder volta para aquele order (não a própria)', async () => {
+    const initiator = await makeUser('USER');
+    const manager = await makeUser('MANAGER');
+    // Etapa 1 é de decisão e devolve ao solicitante (order 0), como nas etapas da trilha.
+    const flow = await makeFlow('PAYMENT', [
+      { order: 0 },
+      { order: 1, requiredRole: 'MANAGER', returnStepOrder: 0 },
+    ]);
+    const req = await newRequest(flow.id, initiator.id);
+    const { createRequestTasks } = await import('../src/services/workflow');
+    await createRequestTasks(req.id, flow.id, 0);
+    await completeCurrentStepTasks(req.id);
+    await advanceRequest(req.id); // → etapa 1 (tarefa do MANAGER)
+    expect((await prisma.request.findUniqueOrThrow({ where: { id: req.id } })).currentStep).toBe(1);
+
+    const res = await request(app).post(`/api/requests/${req.id}/decision`).set(auth(tokenFor(manager.id))).send({ action: 'REQUEST_CORRECTION', reason: 'corrigir dados na origem' });
+    expect(res.status).toBe(200);
+    const fresh = await prisma.request.findUniqueOrThrow({ where: { id: req.id } });
+    expect(fresh.status).toBe('AWAITING_CORRECTION');
+    expect(fresh.correctionReturnStep).toBe(0); // devolveu ao solicitante, não à etapa 1
+
+    // Reenvio retoma na etapa 0 (volta ao solicitante).
+    await request(app).post(`/api/requests/${req.id}/resubmit`).set(auth(tokenFor(initiator.id))).send({});
+    const after = await prisma.request.findUniqueOrThrow({ where: { id: req.id } });
+    expect(after.currentStep).toBe(0);
+    expect(after.status).toBe('IN_PROGRESS');
+  });
+
   it('sem motivo → 400', async () => {
     const initiator = await makeUser('USER');
     const manager = await makeUser('MANAGER');

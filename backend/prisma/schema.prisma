@@ -139,6 +139,10 @@ model FlowStep {
   collectsResources  Boolean              @default(false)
   // Fase 0 · Passo 10: rótulo humano de exibição quando a solicitação está nesta etapa.
   statusLabel        String?
+  // Ramo de devolução: ao SOLICITAR CORREÇÃO nesta etapa, para qual `order` o
+  // pedido volta. Null → devolve para a PRÓPRIA etapa (padrão Fase 0). Na trilha
+  // de onboarding, as etapas de decisão usam 0 (volta ao solicitante na submissão).
+  returnStepOrder    Int?
   // Fase 0 · Passo 11: overrides opcionais da cadência de escalonamento (em dias
   // desde a criação da tarefa). Nulo → usa o padrão fixo 2/3/7.
   escalationDay1     Int?
