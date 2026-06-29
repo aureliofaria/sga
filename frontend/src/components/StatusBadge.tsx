@@ -47,7 +47,17 @@ export function FlowTypeBadge({ type }: { type: string }) {
 
 export function roleLabel(role: string): string {
   const map: Record<string, string> = {
+    // Aplicação
     ADMIN: 'Administrador',
+    DIRETORIA: 'Diretoria',
+    // Funções (usadas pelos fluxos/trilha)
+    RH: 'RH',
+    FINANCEIRO: 'Financeiro',
+    TI: 'TI',
+    DADOS: 'Dados',
+    SISTEMAS: 'Sistemas',
+    ADMINISTRATIVO: 'Administrativo',
+    // Genérico / legado
     MANAGER: 'Gestor',
     FINANCE: 'Financeiro',
     HR: 'RH',

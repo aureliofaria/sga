@@ -64,12 +64,14 @@ export const sectorsApi = {
   update: (id: string, data: { name?: string; description?: string; isActive?: boolean }) =>
     api.put<Sector>(`/sectors/${id}`, data).then((r) => r.data),
   delete: (id: string) => api.delete(`/sectors/${id}`).then((r) => r.data),
-  addMember: (sectorId: string, userId: string, role: 'LIDER' | 'PROTETOR') =>
-    api.post<SectorMember>(`/sectors/${sectorId}/members`, { userId, role }).then((r) => r.data),
+  // Adiciona OU atualiza (upsert por userId) um membro com nível e reporta-a.
+  // level: LIDER_1 (Líder I, 1 por setor) | LIDER_2 (Líder II) | MEMBRO.
+  addMember: (sectorId: string, payload: { userId: string; level: 'LIDER_1' | 'LIDER_2' | 'MEMBRO'; reportsToId?: string | null }) =>
+    api.post<SectorMember>(`/sectors/${sectorId}/members`, payload).then((r) => r.data),
   removeMember: (sectorId: string, memberId: string) =>
     api.delete(`/sectors/${sectorId}/members/${memberId}`).then((r) => r.data),
-  updateMember: (sectorId: string, memberId: string, role: 'LIDER' | 'PROTETOR') =>
-    api.put<SectorMember>(`/sectors/${sectorId}/members/${memberId}`, { role }).then((r) => r.data),
+  updateMember: (sectorId: string, memberId: string, data: { level?: 'LIDER_1' | 'LIDER_2' | 'MEMBRO'; reportsToId?: string | null }) =>
+    api.put<SectorMember>(`/sectors/${sectorId}/members/${memberId}`, data).then((r) => r.data),
   availableUsers: (sectorId: string) =>
     api.get<User[]>(`/sectors/${sectorId}/available-users`).then((r) => r.data),
 };

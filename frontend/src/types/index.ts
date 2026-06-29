@@ -5,12 +5,16 @@ export interface Department {
   _count?: { users: number };
 }
 
+export type SectorLevel = 'LIDER_1' | 'LIDER_2' | 'MEMBRO';
+
 export interface SectorMember {
   id: string;
   sectorId: string;
   userId: string;
   user: Pick<User, 'id' | 'name' | 'email' | 'role'>;
   role: 'LIDER' | 'PROTETOR';
+  level: SectorLevel;
+  reportsToId?: string | null;
   createdAt: string;
 }
 

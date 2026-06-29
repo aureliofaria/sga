@@ -5,18 +5,25 @@ import Header from '../components/Header';
 import toast from 'react-hot-toast';
 import type { Sector, SectorMember } from '../types';
 
-const roleLabel: Record<string, string> = { LIDER: 'Líder', PROTETOR: 'Protetor' };
-const roleBadge: Record<string, string> = {
-  LIDER: 'bg-golplus-blue-100 text-golplus-blue-700',
-  PROTETOR: 'bg-golplus-orange-100 text-golplus-orange-700',
-};
+type Level = 'LIDER_1' | 'LIDER_2' | 'MEMBRO';
+const LEVELS: { value: Level; label: string; badge: string; dot: string }[] = [
+  { value: 'LIDER_1', label: 'Líder I', badge: 'bg-golplus-blue-100 text-golplus-blue-800', dot: 'bg-golplus-blue' },
+  { value: 'LIDER_2', label: 'Líder II', badge: 'bg-golplus-blue-50 text-golplus-blue-700', dot: 'bg-golplus-blue-400' },
+  { value: 'MEMBRO', label: 'Membro', badge: 'bg-golplus-orange-100 text-golplus-orange-700', dot: 'bg-golplus-orange' },
+];
+const levelMeta = (l: string) => LEVELS.find((x) => x.value === l) ?? LEVELS[2];
 
-function MemberBadge({ member, onRemove, onChangeRole }: {
+function MemberBadge({ member, supervisors, onRemove, onChangeLevel, onChangeReportsTo }: {
   member: SectorMember;
+  supervisors: SectorMember[]; // possíveis "reporta a" (Líder I/II do setor, exceto ele)
   onRemove: () => void;
-  onChangeRole: (role: 'LIDER' | 'PROTETOR') => void;
+  onChangeLevel: (level: Level) => void;
+  onChangeReportsTo: (reportsToId: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const meta = levelMeta(member.level);
+  const isMemberOrL2 = member.level === 'MEMBRO' || member.level === 'LIDER_2';
+  const supName = supervisors.find((s) => s.id === member.reportsToId)?.user.name;
   return (
     <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-xl border border-gray-200 shadow-sm">
       <div className="w-8 h-8 rounded-full bg-golplus-blue-100 flex items-center justify-center text-golplus-blue-700 font-bold text-sm">
@@ -24,32 +31,45 @@ function MemberBadge({ member, onRemove, onChangeRole }: {
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-gray-900 truncate">{member.user.name}</div>
-        <div className="text-xs text-gray-400 truncate">{member.user.email}</div>
+        <div className="text-xs text-gray-400 truncate">
+          {member.user.email}{isMemberOrL2 && supName ? ` · reporta a ${supName}` : ''}
+        </div>
       </div>
       <div className="relative">
-        <button
-          onClick={() => setOpen(!open)}
-          className={`px-2 py-1 rounded-lg text-xs font-medium ${roleBadge[member.role]} cursor-pointer`}
-        >
-          {roleLabel[member.role]} ▾
+        <button onClick={() => setOpen(!open)} className={`px-2 py-1 rounded-lg text-xs font-medium ${meta.badge} cursor-pointer`}>
+          {meta.label} ▾
         </button>
         {open && (
-          <div className="absolute right-0 top-7 z-10 bg-white border border-gray-200 rounded-xl shadow-lg py-1 w-32">
-            {(['LIDER', 'PROTETOR'] as const).map((r) => (
+          <div className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 w-48">
+            <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-400">Nível</div>
+            {LEVELS.map((lv) => (
               <button
-                key={r}
-                onClick={() => { onChangeRole(r); setOpen(false); }}
-                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${member.role === r ? 'font-bold' : ''}`}
+                key={lv.value}
+                onClick={() => { onChangeLevel(lv.value); setOpen(false); }}
+                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${member.level === lv.value ? 'font-bold' : ''}`}
               >
-                {roleLabel[r]}
+                {lv.label}
               </button>
             ))}
+            {isMemberOrL2 && (
+              <>
+                <hr className="my-1" />
+                <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-400">Reporta a</div>
+                <select
+                  value={member.reportsToId ?? ''}
+                  onChange={(e) => { onChangeReportsTo(e.target.value || null); setOpen(false); }}
+                  className="mx-2 my-1 w-[calc(100%-1rem)] px-2 py-1 border border-gray-200 rounded-lg text-xs"
+                >
+                  <option value="">— (direto ao Líder I)</option>
+                  {supervisors.map((s) => (
+                    <option key={s.id} value={s.id}>{levelMeta(s.level).label}: {s.user.name}</option>
+                  ))}
+                </select>
+              </>
+            )}
             <hr className="my-1" />
-            <button
-              onClick={() => { onRemove(); setOpen(false); }}
-              className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
-            >
-              Remover
+            <button onClick={() => { onRemove(); setOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50">
+              Remover do setor
             </button>
           </div>
         )}
@@ -63,15 +83,22 @@ function SectorCard({ sector }: { sector: Sector }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(sector.name);
   const [description, setDescription] = useState(sector.description || '');
-  const [addingRole, setAddingRole] = useState<'LIDER' | 'PROTETOR' | null>(null);
+  const [adding, setAdding] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
+  const [newLevel, setNewLevel] = useState<Level>('MEMBRO');
+  const [newReportsTo, setNewReportsTo] = useState('');
   const qc = useQueryClient();
 
   const { data: available } = useQuery({
     queryKey: ['sector-available', sector.id],
     queryFn: () => sectorsApi.availableUsers(sector.id),
-    enabled: !!addingRole,
+    enabled: adding,
   });
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['sectors'] });
+    qc.invalidateQueries({ queryKey: ['sector-available', sector.id] });
+  };
 
   const updateMut = useMutation({
     mutationFn: () => sectorsApi.update(sector.id, { name, description }),
@@ -91,35 +118,58 @@ function SectorCard({ sector }: { sector: Sector }) {
   });
 
   const addMemberMut = useMutation({
-    mutationFn: ({ userId, role }: { userId: string; role: 'LIDER' | 'PROTETOR' }) =>
-      sectorsApi.addMember(sector.id, userId, role),
+    mutationFn: () => sectorsApi.addMember(sector.id, {
+      userId: selectedUserId,
+      level: newLevel,
+      reportsToId: newLevel === 'LIDER_1' ? null : (newReportsTo || null),
+    }),
     onSuccess: () => {
       toast.success('Membro adicionado');
-      setAddingRole(null);
-      setSelectedUserId('');
-      qc.invalidateQueries({ queryKey: ['sectors'] });
-      qc.invalidateQueries({ queryKey: ['sector-available', sector.id] });
+      setAdding(false); setSelectedUserId(''); setNewLevel('MEMBRO'); setNewReportsTo('');
+      invalidate();
     },
-    onError: () => toast.error('Erro ao adicionar membro'),
+    onError: (e: any) => toast.error(e?.response?.data?.error || 'Erro ao adicionar membro'),
   });
 
   const removeMemberMut = useMutation({
     mutationFn: (memberId: string) => sectorsApi.removeMember(sector.id, memberId),
-    onSuccess: () => {
-      toast.success('Membro removido');
-      qc.invalidateQueries({ queryKey: ['sectors'] });
-      qc.invalidateQueries({ queryKey: ['sector-available', sector.id] });
-    },
+    onSuccess: () => { toast.success('Membro removido'); invalidate(); },
   });
 
-  const changeRoleMut = useMutation({
-    mutationFn: ({ memberId, role }: { memberId: string; role: 'LIDER' | 'PROTETOR' }) =>
-      sectorsApi.updateMember(sector.id, memberId, role),
-    onSuccess: () => { toast.success('Papel atualizado'); qc.invalidateQueries({ queryKey: ['sectors'] }); },
+  const changeLevelMut = useMutation({
+    mutationFn: ({ memberId, level }: { memberId: string; level: Level }) =>
+      sectorsApi.updateMember(sector.id, memberId, { level }),
+    onSuccess: () => { toast.success('Nível atualizado'); invalidate(); },
+    onError: (e: any) => toast.error(e?.response?.data?.error || 'Erro ao atualizar nível'),
   });
 
-  const lideres = sector.members.filter((m) => m.role === 'LIDER');
-  const protetores = sector.members.filter((m) => m.role === 'PROTETOR');
+  const changeReportsMut = useMutation({
+    mutationFn: ({ memberId, reportsToId }: { memberId: string; reportsToId: string | null }) =>
+      sectorsApi.updateMember(sector.id, memberId, { reportsToId }),
+    onSuccess: () => { toast.success('"Reporta a" atualizado'); invalidate(); },
+    onError: () => toast.error('Erro ao atualizar'),
+  });
+
+  const lider1 = sector.members.filter((m) => m.level === 'LIDER_1');
+  const lider2 = sector.members.filter((m) => m.level === 'LIDER_2');
+  const membros = sector.members.filter((m) => m.level === 'MEMBRO');
+  // Possíveis "reporta a": Líder I e Líderes II do setor.
+  const supervisors = [...lider1, ...lider2];
+
+  const renderGroup = (list: SectorMember[]) => (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+      {list.map((m) => (
+        <MemberBadge
+          key={m.id}
+          member={m}
+          supervisors={supervisors.filter((s) => s.id !== m.id)}
+          onRemove={() => removeMemberMut.mutate(m.id)}
+          onChangeLevel={(level) => changeLevelMut.mutate({ memberId: m.id, level })}
+          onChangeReportsTo={(reportsToId) => changeReportsMut.mutate({ memberId: m.id, reportsToId })}
+        />
+      ))}
+    </div>
+  );
 
   return (
     <div className={`bg-white rounded-2xl border shadow-sm transition-all ${sector.isActive ? 'border-gray-200' : 'border-dashed border-gray-300 opacity-70'}`}>
@@ -155,14 +205,15 @@ function SectorCard({ sector }: { sector: Sector }) {
           </div>
         )}
 
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 bg-golplus-blue rounded-full" />
-            {lideres.length} líder{lideres.length !== 1 ? 'es' : ''}
+        <div className="flex items-center gap-3 text-xs text-gray-500">
+          <span className="flex items-center gap-1" title="Líder I">
+            <span className="w-2 h-2 bg-golplus-blue rounded-full" />{lider1.length} L-I
           </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 bg-golplus-orange rounded-full" />
-            {protetores.length} protetor{protetores.length !== 1 ? 'es' : ''}
+          <span className="flex items-center gap-1" title="Líder II">
+            <span className="w-2 h-2 bg-golplus-blue-400 rounded-full" />{lider2.length} L-II
+          </span>
+          <span className="flex items-center gap-1" title="Membros">
+            <span className="w-2 h-2 bg-golplus-orange rounded-full" />{membros.length} memb.
           </span>
         </div>
 
@@ -191,102 +242,74 @@ function SectorCard({ sector }: { sector: Sector }) {
       {/* Expanded content */}
       {expanded && (
         <div className="border-t border-gray-100 p-5 space-y-5">
-          {/* Líderes */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-golplus-blue flex items-center gap-2">
-                <span className="w-2 h-2 bg-golplus-blue rounded-full" />
-                Líderes de Setor
-              </h3>
-              <button
-                onClick={() => setAddingRole(addingRole === 'LIDER' ? null : 'LIDER')}
-                className="text-xs text-golplus-blue hover:text-golplus-blue-700 font-medium"
-              >
-                + Adicionar Líder
-              </button>
-            </div>
-            {lideres.length === 0 && <p className="text-xs text-gray-400 italic">Nenhum líder atribuído.</p>}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {lideres.map((m) => (
-                <MemberBadge
-                  key={m.id}
-                  member={m}
-                  onRemove={() => removeMemberMut.mutate(m.id)}
-                  onChangeRole={(role) => changeRoleMut.mutate({ memberId: m.id, role })}
-                />
-              ))}
-            </div>
-            {addingRole === 'LIDER' && (
-              <div className="mt-3 flex gap-2">
-                <select
-                  value={selectedUserId}
-                  onChange={(e) => setSelectedUserId(e.target.value)}
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-300"
-                >
-                  <option value="">Selecionar usuário...</option>
-                  {(available || []).map((u) => (
-                    <option key={u.id} value={u.id}>{u.name} — {u.email}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={() => { if (selectedUserId) addMemberMut.mutate({ userId: selectedUserId, role: 'LIDER' }); }}
-                  disabled={!selectedUserId}
-                  className="px-4 py-2 bg-golplus-blue text-white rounded-xl text-sm disabled:opacity-40"
-                >
-                  Adicionar
-                </button>
-                <button onClick={() => { setAddingRole(null); setSelectedUserId(''); }} className="px-3 py-2 border border-gray-200 rounded-xl text-sm">✕</button>
-              </div>
-            )}
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-500">
+              Hierarquia: <b>Líder I</b> (1 por setor, vê todo o setor) · <b>Líder II</b> (vê seus reportes) · <b>Membro</b> (vê os próprios).
+            </p>
+            <button
+              onClick={() => setAdding((v) => !v)}
+              className="text-xs text-golplus-blue hover:text-golplus-blue-700 font-medium"
+            >
+              {adding ? '✕ Cancelar' : '+ Adicionar pessoa'}
+            </button>
           </div>
 
-          {/* Protetores */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-golplus-orange flex items-center gap-2">
-                <span className="w-2 h-2 bg-golplus-orange rounded-full" />
-                Protetores
-              </h3>
-              <button
-                onClick={() => setAddingRole(addingRole === 'PROTETOR' ? null : 'PROTETOR')}
-                className="text-xs text-golplus-orange hover:text-golplus-orange-700 font-medium"
-              >
-                + Adicionar Protetor
-              </button>
-            </div>
-            {protetores.length === 0 && <p className="text-xs text-gray-400 italic">Nenhum protetor atribuído.</p>}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {protetores.map((m) => (
-                <MemberBadge
-                  key={m.id}
-                  member={m}
-                  onRemove={() => removeMemberMut.mutate(m.id)}
-                  onChangeRole={(role) => changeRoleMut.mutate({ memberId: m.id, role })}
-                />
-              ))}
-            </div>
-            {addingRole === 'PROTETOR' && (
-              <div className="mt-3 flex gap-2">
-                <select
-                  value={selectedUserId}
-                  onChange={(e) => setSelectedUserId(e.target.value)}
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-golplus-orange-300"
-                >
-                  <option value="">Selecionar usuário...</option>
-                  {(available || []).map((u) => (
-                    <option key={u.id} value={u.id}>{u.name} — {u.email}</option>
-                  ))}
+          {adding && (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-medium text-gray-500 mb-1">Usuário</label>
+                <select value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                  <option value="">Selecionar...</option>
+                  {(available || []).map((u) => <option key={u.id} value={u.id}>{u.name} — {u.email}</option>)}
                 </select>
-                <button
-                  onClick={() => { if (selectedUserId) addMemberMut.mutate({ userId: selectedUserId, role: 'PROTETOR' }); }}
-                  disabled={!selectedUserId}
-                  className="px-4 py-2 bg-golplus-orange text-white rounded-xl text-sm disabled:opacity-40"
-                >
-                  Adicionar
-                </button>
-                <button onClick={() => { setAddingRole(null); setSelectedUserId(''); }} className="px-3 py-2 border border-gray-200 rounded-xl text-sm">✕</button>
               </div>
-            )}
+              <div>
+                <label className="block text-[11px] font-medium text-gray-500 mb-1">Nível</label>
+                <select value={newLevel} onChange={(e) => setNewLevel(e.target.value as Level)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                  {LEVELS.map((lv) => <option key={lv.value} value={lv.value}>{lv.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-gray-500 mb-1">Reporta a</label>
+                <select
+                  value={newReportsTo}
+                  onChange={(e) => setNewReportsTo(e.target.value)}
+                  disabled={newLevel === 'LIDER_1'}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  <option value="">— (Líder I)</option>
+                  {supervisors.map((s) => <option key={s.id} value={s.id}>{levelMeta(s.level).label}: {s.user.name}</option>)}
+                </select>
+              </div>
+              <div className="sm:col-span-4 flex justify-end">
+                <button
+                  onClick={() => { if (selectedUserId) addMemberMut.mutate(); }}
+                  disabled={!selectedUserId || addMemberMut.isPending}
+                  className="px-4 py-2 bg-golplus-blue text-white rounded-lg text-sm disabled:opacity-40"
+                >
+                  {addMemberMut.isPending ? 'Adicionando...' : 'Adicionar ao setor'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <h3 className="text-sm font-semibold text-golplus-blue flex items-center gap-2 mb-2">
+              <span className="w-2 h-2 bg-golplus-blue rounded-full" /> Líder I
+            </h3>
+            {lider1.length === 0 ? <p className="text-xs text-gray-400 italic">Nenhum Líder I — defina um para o setor ser visível pela liderança.</p> : renderGroup(lider1)}
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-golplus-blue flex items-center gap-2 mb-2">
+              <span className="w-2 h-2 bg-golplus-blue-400 rounded-full" /> Líder II
+            </h3>
+            {lider2.length === 0 ? <p className="text-xs text-gray-400 italic">Nenhum Líder II.</p> : renderGroup(lider2)}
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-golplus-orange flex items-center gap-2 mb-2">
+              <span className="w-2 h-2 bg-golplus-orange rounded-full" /> Membros
+            </h3>
+            {membros.length === 0 ? <p className="text-xs text-gray-400 italic">Nenhum membro.</p> : renderGroup(membros)}
           </div>
         </div>
       )}
@@ -329,7 +352,7 @@ export default function Setores() {
     <div>
       <Header
         title="Setores"
-        subtitle="Gerencie os setores, líderes e protetores da Gol Plus"
+        subtitle="Gerencie os setores e a hierarquia (Líder I / Líder II / Membros) da Gol Plus"
       />
 
       {/* Toolbar */}

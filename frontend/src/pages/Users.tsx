@@ -6,7 +6,14 @@ import Header from '../components/Header';
 import toast from 'react-hot-toast';
 import type { User } from '../types';
 
-const roles = ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'];
+// Papéis agrupados. As FUNÇÕES (RH/FINANCEIRO/TI/DADOS/SISTEMAS/ADMINISTRATIVO/
+// DIRETORIA) são as que a trilha de onboarding e o roteamento de pagamento usam;
+// os legados (MANAGER/FINANCE/HR/USER) ficam para compatibilidade.
+const ROLE_GROUPS: { label: string; roles: string[] }[] = [
+  { label: 'Aplicação', roles: ['ADMIN', 'DIRETORIA'] },
+  { label: 'Funções (fluxos)', roles: ['RH', 'FINANCEIRO', 'TI', 'DADOS', 'SISTEMAS', 'ADMINISTRATIVO'] },
+  { label: 'Genérico / legado', roles: ['MANAGER', 'FINANCE', 'HR', 'USER'] },
+];
 
 const requestTypes = [
   { type: 'ONBOARDING', label: 'Admissão', icon: '👤' },
@@ -75,8 +82,13 @@ function UserModal({ user, onClose }: { user?: User; onClose: () => void }) {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Perfil</label>
             <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500">
-              {roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+              {ROLE_GROUPS.map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                </optgroup>
+              ))}
             </select>
+            <p className="text-xs text-gray-400 mt-1">Funções definem o roteamento nos fluxos (ex.: RH, Diretoria, TI). A filiação a setores é feita em <b>Setores</b>.</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Departamento</label>
