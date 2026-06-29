@@ -78,10 +78,13 @@ if (require.main === module) {
 
   // Agendador in-process do escalonamento temporal (Fase 0 · Passo 11). Só roda
   // quando o módulo é executado diretamente — sob teste o `app` é importado
-  // (require.main !== module), então o timer NÃO inicia.
-  setInterval(
-    () => processEscalations().catch((e) => console.error('[escalation]', e)),
-    Number(process.env.ESCALATION_INTERVAL_MS) || 600000
-  );
+  // (require.main !== module), então o timer NÃO inicia. O check de NODE_ENV é
+  // defesa em profundidade (não ligar o agendador em ambiente de teste).
+  if (process.env.NODE_ENV !== 'test') {
+    setInterval(
+      () => processEscalations().catch((e) => console.error('[escalation]', e)),
+      Number(process.env.ESCALATION_INTERVAL_MS) || 600000
+    );
+  }
 }
 export default app;

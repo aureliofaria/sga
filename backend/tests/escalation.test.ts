@@ -181,6 +181,26 @@ describe('escalonamento temporal (Fase 0 · Passo 11)', () => {
     expect(updated.slaEscalated).toBe(true);
   });
 
+  it('estágio 3 quando o Líder I é o próprio iniciador: NÃO transfere (SoD), mantém o responsável', async () => {
+    const initiator = await makeUser('USER', 'init-lider');
+    const assignee = await makeUser('USER', 'resp');
+    // Setor cujo Líder I é o PRÓPRIO iniciador.
+    const sector = await prisma.sector.create({ data: { name: 'SetorLiderIniciador' } });
+    await prisma.sectorMember.create({
+      data: { sectorId: sector.id, userId: initiator.id, role: 'LIDER', level: 'LIDER_1' },
+    });
+    const flow = await makeFlow('GENERIC', [{ order: 0, handlingSectorId: sector.id }]);
+    const step = await prisma.flowStep.findFirstOrThrow({ where: { flowTemplateId: flow.id, order: 0 } });
+    const { task } = await makeTaskOnStep({ flowId: flow.id, stepId: step.id, initiatorId: initiator.id, assigneeId: assignee.id });
+
+    expect(await processEscalations(nowPlusDays(task.createdAt, 7))).toBe(1);
+    const updated = await prisma.requestTask.findUniqueOrThrow({ where: { id: task.id } });
+    // Segregação de funções: a tarefa NÃO é transferida ao iniciador.
+    expect(updated.assigneeId).toBe(assignee.id);
+    expect(updated.escalationStage).toBe(3);
+    expect(updated.slaEscalated).toBe(true);
+  });
+
   it('dispara o estágio mais severo elegível (pula direto ao 3 com 7 dias)', async () => {
     const initiator = await makeUser('USER', 'init');
     const assignee = await makeUser('USER', 'resp');

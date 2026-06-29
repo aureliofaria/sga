@@ -356,7 +356,15 @@ async function applyStage2(task: EscalationTask): Promise<boolean> {
 // escalationStage < 3.
 async function applyStage3(task: EscalationTask): Promise<{ applied: boolean; newAssigneeId: string | null }> {
   const leader = await resolveStepLeader(task.step.handlingSectorId);
-  const newAssigneeId = leader ? leader.id : task.assigneeId;
+  // Segregação de funções: NÃO transferir a tarefa ao próprio solicitante. Se o
+  // único líder do setor for o iniciador, trata-se como "sem destino válido" —
+  // o escalonamento ocorre (estágio 3, notificações), mas o responsável é mantido.
+  const initiatorIsLeader = !!leader && leader.id === task.request.initiator.id;
+  const effectiveLeader = initiatorIsLeader ? null : leader;
+  const newAssigneeId = effectiveLeader ? effectiveLeader.id : task.assigneeId;
+  const keepReason = initiatorIsLeader
+    ? 'líder do setor é o próprio solicitante (segregação de funções)'
+    : 'sem líder no setor';
   const applied = await prisma.$transaction(async (tx) => {
     const upd = await tx.requestTask.updateMany({
       where: { id: task.id, escalationStage: { lt: 3 } },
@@ -367,25 +375,25 @@ async function applyStage3(task: EscalationTask): Promise<{ applied: boolean; ne
       data: {
         requestId: task.requestId, userId: 'system', userName: 'Sistema',
         action: 'ESCALATION_STAGE_3',
-        details: leader
-          ? `Escalonamento estágio 3 — tarefa "${task.title}" transferida ao líder ${leader.name}`
-          : `Escalonamento estágio 3 — tarefa "${task.title}" mantida com ${task.assignee.name} (sem líder no setor)`,
+        details: effectiveLeader
+          ? `Escalonamento estágio 3 — tarefa "${task.title}" transferida ao líder ${effectiveLeader.name}`
+          : `Escalonamento estágio 3 — tarefa "${task.title}" mantida com ${task.assignee.name} (${keepReason})`,
       },
     });
-    // Notifica responsável anterior, líder (se houver) e iniciador.
+    // Notifica responsável anterior, líder (se houver destino válido) e iniciador.
     const recipients = [task.assigneeId, task.request.initiator.id];
-    if (leader) recipients.push(leader.id);
+    if (effectiveLeader) recipients.push(effectiveLeader.id);
     await notifyMany(tx, recipients, {
       type: 'TASK_ESCALATED_TO_LEADER',
       title: 'Tarefa escalonada — transferida',
-      body: leader
-        ? `A tarefa "${task.title}" em "${task.request.title}" foi transferida ao líder ${leader.name} por atraso prolongado.`
-        : `A tarefa "${task.title}" em "${task.request.title}" segue em atraso prolongado (sem líder no setor).`,
+      body: effectiveLeader
+        ? `A tarefa "${task.title}" em "${task.request.title}" foi transferida ao líder ${effectiveLeader.name} por atraso prolongado.`
+        : `A tarefa "${task.title}" em "${task.request.title}" segue em atraso prolongado (${keepReason}).`,
       requestId: task.requestId,
     });
     return true;
   });
-  return { applied, newAssigneeId: applied && leader ? newAssigneeId : null };
+  return { applied, newAssigneeId: applied && effectiveLeader ? newAssigneeId : null };
 }
 
 // Varre as tarefas elegíveis e dispara o estágio mais severo ainda não disparado.
