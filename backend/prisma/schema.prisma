@@ -25,6 +25,7 @@ model User {
   initiatedRequests       Request[]                @relation("Initiator")
   assignedTasks           RequestTask[]
   approvals               Approval[]
+  forwardedApprovals      Approval[]               @relation("ApprovalForwardTarget")
   sectorRoles             SectorMember[]
   comments                Comment[]
   notifications           Notification[]
@@ -36,6 +37,16 @@ model User {
   assetMovementsTo      AssetMovement[]  @relation("MovDestinoUser")
   assetMovementsCreated AssetMovement[]  @relation("MovCreator")
   inventoryCounts       InventoryCount[] @relation("InventoryCountCreator")
+
+  // Checklist
+  checklistItemsChecked RequestChecklistItem[]
+
+  // Escalonamento temporal (Fase 0 · Passo 11): tarefas cuja justificativa de
+  // atraso foi registrada por este usuário.
+  delayJustifications RequestTask[] @relation("TaskDelayJustifier")
+
+  // Parâmetros financeiros (Fase 0 · Passo 12): teto/override editados por este usuário.
+  financeParamEdits FinanceParam[] @relation("FinanceParamEditor")
 }
 
 model Department {
@@ -66,6 +77,7 @@ model Sector {
   activatedSteps FlowStep[]     @relation("StepActivationSector")
   requests       Request[]      @relation("RequestSector")
   resourceItems  ResourceItem[] @relation("SectorResources")
+  financeParams  FinanceParam[]
 }
 
 model SectorMember {
@@ -74,7 +86,18 @@ model SectorMember {
   sector    Sector   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      String // LIDER, PROTETOR
+  role      String // legado: LIDER, PROTETOR (mantido p/ compat; ver `level`)
+  // Fase 0 — hierarquia: LIDER_1 (1 por setor, obrigatório/único), LIDER_2 (0..n), MEMBRO (0..n).
+  level     String   @default("MEMBRO")
+  // Membro reporta a um LIDER_2 ou direto ao LIDER_1 (apreciação do pedido).
+  reportsToId String?
+  reportsTo   SectorMember?  @relation("MemberReports", fields: [reportsToId], references: [id], onDelete: SetNull)
+  reports     SectorMember[] @relation("MemberReports")
+  // Suplência: LIDER_1 delega a um LIDER_2 por um período (evita travar o setor).
+  delegateToId  String?
+  delegateTo    SectorMember?  @relation("MemberDelegate", fields: [delegateToId], references: [id], onDelete: SetNull)
+  delegatedFrom SectorMember[] @relation("MemberDelegate")
+  delegateUntil DateTime?
   createdAt DateTime @default(now())
 
   @@unique([sectorId, userId, role])
@@ -112,9 +135,58 @@ model FlowStep {
   activateOnSectorId String?
   activateOnSector   Sector?              @relation("StepActivationSector", fields: [activateOnSectorId], references: [id])
   collectsResources  Boolean              @default(false)
+  // Fase 0 · Passo 10: rótulo humano de exibição quando a solicitação está nesta etapa.
+  statusLabel        String?
+  // Fase 0 · Passo 11: overrides opcionais da cadência de escalonamento (em dias
+  // desde a criação da tarefa). Nulo → usa o padrão fixo 2/3/7.
+  escalationDay1     Int?
+  escalationDay2     Int?
+  escalationDay3     Int?
   authLevels         AuthorizationLevel[]
   tasks              RequestTask[]
+  formFields         FormField[]
+  checklistItems     ChecklistItem[]
   createdAt          DateTime             @default(now())
+}
+
+// ===========================================================================
+// Campos dinâmicos por etapa (Fase 0 · Passo 7) — definição (FormField) e
+// valores preenchidos por solicitação (RequestFieldValue). O gancho de PII é o
+// `sensitiveType`: quando setado, o valor é mascarado na leitura conforme a
+// política do Passo 4 (fieldMasking.ts).
+// ===========================================================================
+
+model FormField {
+  id            String              @id @default(cuid())
+  flowStepId    String
+  flowStep      FlowStep            @relation(fields: [flowStepId], references: [id], onDelete: Cascade)
+  key           String // snake_case, único na etapa
+  label         String
+  type          String // TEXT|TEXTAREA|NUMBER|DATE|SELECT|EMAIL|CPF|RG|MONEY|PHONE
+  required      Boolean             @default(false)
+  options       String? // JSON array p/ SELECT
+  order         Int                 @default(0)
+  sensitiveType String? // SensitiveType ('CPF'|'RG'|'SALARY'|'EMAIL_PERSONAL'|'PHONE_PERSONAL') — gancho do mascaramento
+  values        RequestFieldValue[]
+  createdAt     DateTime            @default(now())
+
+  @@unique([flowStepId, key])
+  @@index([flowStepId])
+}
+
+model RequestFieldValue {
+  id        String    @id @default(cuid())
+  requestId String
+  request   Request   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  fieldId   String
+  field     FormField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  value     String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([requestId, fieldId])
+  @@index([requestId])
+  @@index([fieldId])
 }
 
 model AuthorizationLevel {
@@ -141,6 +213,9 @@ model Request {
   description      String?
   status           String            @default("PENDING")
   currentStep      Int               @default(0)
+  // Etapa para a qual o pedido retorna quando o solicitante reenvia após uma
+  // SOLICITAÇÃO DE CORREÇÃO (status AWAITING_CORRECTION). Nulo fora desse estado.
+  correctionReturnStep Int?
   targetEmployee   String?
   targetDepartment String?
   startDate        String?
@@ -151,6 +226,15 @@ model Request {
   justification    String?
   vacancyType      String?
   replacementName  String?
+  // Subfluxo pai↔filho (Fase 0 · Passo 9): vínculo opcional com a solicitação
+  // que originou esta (ex.: vaga → compra). SetNull para não cascatear exclusões.
+  parentRequestId  String?
+  parent           Request?          @relation("RequestParentChild", fields: [parentRequestId], references: [id], onDelete: SetNull)
+  children         Request[]         @relation("RequestParentChild")
+  // Fase 0 · Passo 10: rótulo de exibição DENORMALIZADO da etapa corrente.
+  // Espelha FlowStep.statusLabel da etapa atual para leitura eficiente na lista
+  // (sem joins). Atualizado na criação e no avanço de etapa; zerado na conclusão.
+  statusLabel      String?
   tasks            RequestTask[]
   resources        RequestResource[]
   attachments      Attachment[]
@@ -159,6 +243,8 @@ model Request {
   assetMovements   AssetMovement[]
   comments         Comment[]
   notifications    Notification[]
+  fieldValues      RequestFieldValue[]
+  checklistItems   RequestChecklistItem[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 }
@@ -221,6 +307,14 @@ model RequestTask {
   completedAt  DateTime?
   notes        String?
   slaEscalated Boolean      @default(false)
+  // Escalonamento temporal (Fase 0 · Passo 11): estágio mais severo já disparado
+  // (0 = nenhum, 1 = lembrete ao responsável, 2 = líder, 3 = transferência).
+  escalationStage    Int       @default(0)
+  // Justificativa de atraso registrada pelo responsável (ou ADMIN).
+  delayJustification String?
+  delayJustifiedAt   DateTime?
+  delayJustifiedById String?
+  delayJustifiedBy   User?     @relation("TaskDelayJustifier", fields: [delayJustifiedById], references: [id], onDelete: SetNull)
   attachments  Attachment[]
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
@@ -248,13 +342,22 @@ model Approval {
   approverId String
   approver   User     @relation(fields: [approverId], references: [id])
   stepOrder  Int
+  // APPROVED | REJECTED | CORRECTION_REQUESTED | FORWARDED
   decision   String
   comments   String?
+  // Destino de um ENCAMINHAMENTO (decision=FORWARDED): usuário específico OU papel
+  // (modelo de fila). Exatamente um dos dois é preenchido no encaminhamento.
+  forwardedToId   String?
+  forwardedTo     User?    @relation("ApprovalForwardTarget", fields: [forwardedToId], references: [id])
+  forwardedToRole String?
+  // Rodada de decisão da etapa. Reenvios após correção incrementam o round, de
+  // modo que decisões de rodadas anteriores não contam para a completude atual.
+  round      Int      @default(0)
   createdAt  DateTime @default(now())
 
-  // Impede que o mesmo aprovador registre mais de uma decisão na mesma etapa,
+  // Impede que o mesmo aprovador registre mais de uma decisão na mesma etapa+rodada,
   // o que poderia burlar a exigência de múltiplos aprovadores (requiredApprovers).
-  @@unique([requestId, stepOrder, approverId])
+  @@unique([requestId, stepOrder, approverId, round])
 }
 
 model AuditLog {
@@ -434,4 +537,101 @@ model InventoryCountItem {
   updatedAt     DateTime       @updatedAt
 
   @@unique([countId, assetId])
+}
+
+// ===========================================================================
+// Checklist por etapa (Fase 0 · Passo 8) — definição (ChecklistItem) e estados
+// por solicitação (RequestChecklistItem). O campo `condition` armazena JSON
+// fechado descrevendo a condição de aplicabilidade do item; null = sempre visível.
+// ===========================================================================
+
+model ChecklistItem {
+  id         String                 @id @default(cuid())
+  flowStepId String
+  flowStep   FlowStep               @relation(fields: [flowStepId], references: [id], onDelete: Cascade)
+  label      String
+  order      Int                    @default(0)
+  required   Boolean                @default(true)
+  condition  String?                // JSON fechado; null = sempre aplicável
+  createdAt  DateTime               @default(now())
+  states     RequestChecklistItem[]
+
+  @@index([flowStepId])
+}
+
+model RequestChecklistItem {
+  id          String        @id @default(cuid())
+  requestId   String
+  request     Request       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        ChecklistItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  checked     Boolean       @default(false)
+  checkedById String?
+  checkedBy   User?         @relation(fields: [checkedById], references: [id], onDelete: SetNull)
+  checkedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([requestId, itemId])
+  @@index([requestId])
+  @@index([itemId])
+}
+
+// ===========================================================================
+// Parâmetros financeiros (Fase 0 · Passo 12) — teto orçamentário mensal por
+// setor, consumo (calculado a partir das solicitações concluídas no mês ou
+// substituído por um override manual) e auditoria das edições. Valores SEMPRE
+// em centavos inteiros.
+// ===========================================================================
+
+model FinanceParam {
+  id                    String   @id @default(cuid())
+  sectorId              String
+  sector                Sector   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  year                  Int
+  month                 Int // 1–12
+  ceilingCents          Int // teto manual
+  overrideConsumedCents Int? // override manual; quando presente SUBSTITUI o consumido calculado
+  updatedById           String
+  updatedBy             User     @relation("FinanceParamEditor", fields: [updatedById], references: [id])
+  updatedAt             DateTime @updatedAt
+  createdAt             DateTime @default(now())
+
+  @@unique([sectorId, year, month])
+  @@index([sectorId])
+}
+
+model FinanceParamAuditLog {
+  id        String   @id @default(cuid())
+  sectorId  String
+  year      Int
+  month     Int
+  userId    String
+  userName  String
+  action    String // FINANCE_PARAM_UPSERTED | FINANCE_OVERRIDE_SET | FINANCE_OVERRIDE_CLEARED | FINANCE_PARAM_DELETED
+  details   String? // JSON {before, after}
+  createdAt DateTime @default(now())
+
+  @@index([sectorId])
+  @@index([userId])
+}
+
+// Trilha PERSISTENTE da concessão/revogação de suplência do Líder I (Fase 0 ·
+// Passo 13). Transferência de autoridade precisa de auditoria consultável. O
+// AuditLog principal exige requestId (FK), então usamos tabela dedicada — mesmo
+// padrão do FinanceParamAuditLog.
+model DelegationAuditLog {
+  id               String    @id @default(cuid())
+  sectorId         String
+  lider1MemberId   String
+  delegateMemberId String?
+  delegateUserId   String?
+  action           String // DELEGATION_SET | DELEGATION_CLEARED
+  until            DateTime?
+  byUserId         String
+  byUserName       String
+  createdAt        DateTime  @default(now())
+
+  @@index([sectorId])
+  @@index([byUserId])
 }

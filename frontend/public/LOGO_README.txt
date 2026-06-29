@@ -1,20 +1,17 @@
 LOGOS OFICIAIS GOL PLUS
 =======================
 
-Coloque os arquivos oficiais da marca Gol Plus nesta pasta (frontend/public/)
-com EXATAMENTE estes nomes para que o sistema os exiba automaticamente:
+Arquivos oficiais da marca já instalados nesta pasta (frontend/public/):
 
-  - logo-golplus.png         -> versão COLORIDA (para fundos claros, ex: tela de Login)
-  - logo-golplus-branco.png  -> versão BRANCA (para o fundo azul da barra lateral / Sidebar)
+  - logo-golplus.png         -> versão COLORIDA  (gol azul #13294B + plus laranja #ff6413)
+                                usada na tela de Login (fundo claro).
+  - logo-golplus-branco.png  -> versão em FUNDO AZUL (#13294B): gol branco + plus laranja,
+                                usada na barra lateral / Sidebar.
 
-Os arquivos originais estão no OneDrive da Gol Plus, em:
+Origem (não alterar a arte): extraídos do material oficial "logo_gol_plus_a01.pdf"
+fornecido pela Gol Plus — página 1 (colorida em fundo claro) e página 2 (fundo azul).
+Cores oficiais conforme "MANUAL_LOGO_GOL_PLUS.pdf":
+  Azul institucional #13294B (Pantone 2767 C) · Laranja #ff6413 (Pantone 1585 C).
 
-  01 - CLAUDE/Identidade visual/Logo_Gol_Plus/
-
-Onde:
-  - "Gol Plus png.png"          corresponde a logo-golplus.png
-  - "Gol Plus logo branco.png"  corresponde a logo-golplus-branco.png
-
-Enquanto os arquivos não forem adicionados, o componente <Logo /> exibe
-automaticamente um wordmark de fallback (texto "gol+plus" + "APROVA") com
-as cores da marca, sem quebrar a interface.
+O componente <Logo /> carrega esses PNGs automaticamente. Caso sejam removidos,
+ele exibe um wordmark de fallback ("gol plus" + "APROVA") nas cores da marca.

@@ -16,6 +16,8 @@ import inventoryRouter from './routes/inventory';
 import reportsRouter from './routes/reports';
 import auditLogsRouter from './routes/audit-logs';
 import notificationsRouter from './routes/notifications';
+import financeParamsRouter from './routes/financeParams';
+import { processEscalations } from './services/workflow';
 
 const app = express();
 const PORT = config.port;
@@ -57,6 +59,19 @@ app.use('/api/inventory', inventoryRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/audit-logs', auditLogsRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/finance-params', financeParamsRouter);
+
+// Deploy de processo único (V1 / rede interna): quando SERVE_FRONTEND=true, o
+// próprio backend serve o build do frontend, deixando tudo na MESMA origem
+// (http://<ip>:porta) — sem necessidade de nginx. Mantém /api e /uploads
+// intactos (já registrados acima) e faz fallback de SPA para as demais rotas.
+if (process.env.SERVE_FRONTEND === 'true') {
+  const frontendDist = path.resolve(__dirname, '../../frontend/dist');
+  app.use(express.static(frontendDist));
+  app.get(/^\/(?!api\/|uploads\/).*/, (_req, res) => {
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
 
 // Deploy de processo único (V1 / rede interna): quando SERVE_FRONTEND=true, o
 // próprio backend serve o build do frontend, deixando tudo na MESMA origem
@@ -74,5 +89,16 @@ if (process.env.SERVE_FRONTEND === 'true') {
 // em testes (supertest) sem abrir uma porta.
 if (require.main === module) {
   app.listen(PORT, () => console.log(`APROVA API rodando na porta ${PORT}`));
+
+  // Agendador in-process do escalonamento temporal (Fase 0 · Passo 11). Só roda
+  // quando o módulo é executado diretamente — sob teste o `app` é importado
+  // (require.main !== module), então o timer NÃO inicia. O check de NODE_ENV é
+  // defesa em profundidade (não ligar o agendador em ambiente de teste).
+  if (process.env.NODE_ENV !== 'test') {
+    setInterval(
+      () => processEscalations().catch((e) => console.error('[escalation]', e)),
+      Number(process.env.ESCALATION_INTERVAL_MS) || 600000
+    );
+  }
 }
 export default app;

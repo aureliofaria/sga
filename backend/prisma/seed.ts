@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { SECTORS } from '../src/lib/org';
+import { seedOnboardingFlow } from './seedOnboarding';
 
 const prisma = new PrismaClient();
 
@@ -15,14 +17,22 @@ async function main() {
 
   console.log('Departamentos criados');
 
+  // Setores da empresa (Fase 0 — Organização & Acessos). Idempotente e SEMPRE
+  // executado (inclusive em produção): setor é configuração, não dado de demo.
+  for (const name of SECTORS) {
+    const exists = await prisma.sector.findFirst({ where: { name } });
+    if (!exists) await prisma.sector.create({ data: { name } });
+  }
+  console.log(`Setores garantidos (${SECTORS.length})`);
+
   const isProd = process.env.NODE_ENV === 'production';
 
   // Administrador inicial: em produção vem de variáveis de ambiente (sem
-  // credencial padrão); em desenvolvimento usa admin@sga.com / senha123.
+  // credencial padrão); em desenvolvimento usa admin@aprova.com / senha123.
   if (isProd && (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD)) {
     throw new Error('Em produção, defina ADMIN_EMAIL e ADMIN_PASSWORD para criar o administrador inicial.');
   }
-  const adminEmail = process.env.ADMIN_EMAIL || 'admin@sga.com';
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@aprova.com';
   const adminPassword = process.env.ADMIN_PASSWORD || 'senha123';
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
@@ -35,18 +45,39 @@ async function main() {
   let anaRH: any, carlosFinanceiro: any, robertoGestor: any, joao: any;
   if (!isProd) {
     anaRH = await prisma.user.create({
-      data: { name: 'Ana Silva', email: 'rh@sga.com', passwordHash: hash, role: 'HR', departmentId: rh.id },
+      data: { name: 'Ana Silva', email: 'rh@aprova.com', passwordHash: hash, role: 'HR', departmentId: rh.id },
     });
     carlosFinanceiro = await prisma.user.create({
-      data: { name: 'Carlos Souza', email: 'financeiro@sga.com', passwordHash: hash, role: 'FINANCE', departmentId: financeiro.id },
+      data: { name: 'Carlos Souza', email: 'financeiro@aprova.com', passwordHash: hash, role: 'FINANCE', departmentId: financeiro.id },
     });
     robertoGestor = await prisma.user.create({
-      data: { name: 'Roberto Lima', email: 'gestor@sga.com', passwordHash: hash, role: 'MANAGER', departmentId: comercial.id },
+      data: { name: 'Roberto Lima', email: 'gestor@aprova.com', passwordHash: hash, role: 'MANAGER', departmentId: comercial.id },
     });
     joao = await prisma.user.create({
-      data: { name: 'João Santos', email: 'joao@sga.com', passwordHash: hash, role: 'USER', departmentId: ti.id },
+      data: { name: 'João Santos', email: 'joao@aprova.com', passwordHash: hash, role: 'USER', departmentId: ti.id },
     });
     console.log('Usuários de demonstração criados');
+
+    // Hierarquia de setor (Fase 0 · Passo 3) — torna a visibilidade por
+    // setor/hierarquia demonstrável com os usuários de demonstração.
+    //  • Roberto (gestor) é Líder I do setor "TI, Dados e Infra": vê TODOS os
+    //    pedidos do setor (incluindo os de João).
+    //  • Ana (RH) é Líder II do mesmo setor: vê os próprios e os de seus Membros.
+    //  • João é Membro reportando à Ana: vê apenas os próprios pedidos.
+    // Carlos (financeiro) fica sem filiação: comporta-se como Membro (só os seus).
+    const setorTI = await prisma.sector.findFirst({ where: { name: 'TI, Dados e Infra' } });
+    if (setorTI) {
+      const lider1 = await prisma.sectorMember.create({
+        data: { sectorId: setorTI.id, userId: robertoGestor.id, role: 'LIDER', level: 'LIDER_1' },
+      });
+      const lider2 = await prisma.sectorMember.create({
+        data: { sectorId: setorTI.id, userId: anaRH.id, role: 'LIDER', level: 'LIDER_2', reportsToId: lider1.id },
+      });
+      await prisma.sectorMember.create({
+        data: { sectorId: setorTI.id, userId: joao.id, role: 'PROTETOR', level: 'MEMBRO', reportsToId: lider2.id },
+      });
+      console.log('Hierarquia de setor de demonstração criada (Líder I/II/Membro em TI, Dados e Infra)');
+    }
   }
 
   // Catálogo de inventário (recursos alocáveis em admissões / devolvidos em desligamentos)
@@ -340,13 +371,17 @@ async function main() {
   });
   console.log('Inventário patrimonial criado (almoxarifado + catálogo + ativo de exemplo)');
 
+  // Fase 1 — Trilha de Admissão/Onboarding (config idempotente; NÃO altera o
+  // ONBOARDING antigo, que permanece para compat dos testes/e2e atuais).
+  await seedOnboardingFlow(prisma);
+
   console.log('\nSeed concluído com sucesso!');
   if (isProd) {
     console.log(`Administrador: ${adminEmail} (senha definida via ADMIN_PASSWORD).`);
     console.log('Nenhum usuário/solicitação de demonstração criado (produção).');
   } else {
     console.log('\nUsuários de demonstração (senha: senha123):');
-    console.log('  admin@sga.com · rh@sga.com · financeiro@sga.com · gestor@sga.com · joao@sga.com');
+    console.log('  admin@aprova.com · rh@aprova.com · financeiro@aprova.com · gestor@aprova.com · joao@aprova.com');
   }
 }
 

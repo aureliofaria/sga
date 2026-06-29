@@ -1,14 +1,32 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { requestsApi, inventoryApi } from '../services/api';
+import { requestsApi, inventoryApi, tasksApi, flowsApi, usersApi } from '../services/api';
 import { StatusBadge, FlowTypeBadge, roleLabel } from '../components/StatusBadge';
+import DynamicField, { parseFieldOptions } from '../components/DynamicField';
 import FileUpload from '../components/FileUpload';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import type { Request, FlowStep, RequestTask } from '../types';
+
+// Mensagem de erro amigável vinda do backend (axios). Trata 400 de campo/checklist
+// pendente com a mensagem do servidor.
+function apiError(e: any, fallback: string): string {
+  return e?.response?.data?.error || fallback;
+}
+
+// Rótulo legível para o valor de um campo dinâmico (resolve SELECT → label).
+function displayFieldValue(fv: { value: string; field: { type: string; options?: string | null } }): string {
+  if (fv.value === '' || fv.value == null) return '—';
+  if (fv.field.type === 'SELECT') {
+    const opt = parseFieldOptions(fv.field as any).find((o) => o.value === fv.value);
+    return opt?.label ?? fv.value;
+  }
+  return fv.value;
+}
 
 const formatCurrency = (cents?: number) =>
   cents != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100) : '-';
@@ -159,12 +177,306 @@ function ActionModal({ title, onConfirm, onClose, action }: { title: string; onC
   );
 }
 
+// ===========================================================================
+// Checklist por etapa — lista os itens applicable, com toggle (marca/desmarca).
+// Só o assignee da etapa (ou ADMIN) pode alterar; os demais veem em leitura.
+// ===========================================================================
+function ChecklistSection({ request, canEdit }: { request: Request; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const toggle = useMutation({
+    mutationFn: ({ itemId, checked }: { itemId: string; checked: boolean }) =>
+      requestsApi.toggleChecklist(request.id, itemId, checked),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['request', request.id] }),
+    onError: (e: any) => toast.error(apiError(e, 'Não foi possível atualizar o item')),
+  });
+
+  const stepsWithItems = (request.flow?.steps ?? []).filter(
+    (s) => (s.checklistItems ?? []).some((i) => i.applicable),
+  );
+  if (stepsWithItems.length === 0) {
+    return <p className="text-sm text-gray-500 text-center py-4">Nenhum item de checklist para esta solicitação.</p>;
+  }
+
+  return (
+    <div className="space-y-5">
+      {stepsWithItems.map((step) => {
+        const items = (step.checklistItems ?? []).filter((i) => i.applicable);
+        const isCurrent = step.order === request.currentStep;
+        const editable = canEdit && isCurrent;
+        return (
+          <div key={step.id}>
+            <div className="flex items-center gap-2 mb-2">
+              <h4 className="text-sm font-semibold text-gray-700">{step.name}</h4>
+              {isCurrent && <span className="text-xs font-medium bg-golplus-blue-100 text-golplus-blue-800 px-2 py-0.5 rounded-full">Etapa atual</span>}
+            </div>
+            <ul className="space-y-1.5">
+              {items.map((item) => {
+                const pendingRequired = item.required && !item.checked;
+                return (
+                  <li
+                    key={item.id}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${pendingRequired ? 'border-golplus-orange-200 bg-golplus-orange-50' : 'border-gray-200 bg-white'}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!item.checked}
+                      disabled={!editable || toggle.isPending}
+                      onChange={(e) => toggle.mutate({ itemId: item.id, checked: e.target.checked })}
+                      className="rounded border-gray-300 text-golplus-blue-600 disabled:opacity-60"
+                    />
+                    <span className={`text-sm ${item.checked ? 'text-gray-500 line-through' : 'text-gray-800'}`}>{item.label}</span>
+                    {item.required && (
+                      <span className={`ml-auto text-xs font-medium ${pendingRequired ? 'text-golplus-orange-600' : 'text-gray-400'}`}>
+                        {pendingRequired ? 'obrigatório' : 'ok'}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ===========================================================================
+// Preenchimento de campos dinâmicos da ETAPA CORRENTE (quando o usuário é o
+// responsável e há campos obrigatórios sem valor). Grava via POST /:id/fields.
+// ===========================================================================
+function DynamicFieldsFill({ request, step }: { request: Request; step: FlowStep }) {
+  const qc = useQueryClient();
+  const fields = (step.formFields ?? []).slice().sort((a, b) => a.order - b.order);
+  // Pré-popula com valores já salvos (não mascarados aparecem; sensíveis ficam vazios para regravar).
+  const initial: Record<string, string> = {};
+  for (const f of fields) {
+    const fv = request.fieldValues?.find((v) => v.fieldId === f.id);
+    initial[f.id] = fv && !f.sensitiveType ? fv.value : '';
+  }
+  const [values, setValues] = useState<Record<string, string>>(initial);
+
+  const save = useMutation({
+    mutationFn: () => {
+      const payload = fields
+        .map((f) => ({ fieldId: f.id, value: (values[f.id] ?? '').trim() }))
+        .filter((v) => v.value !== '');
+      return requestsApi.saveFields(request.id, step.order, payload);
+    },
+    onSuccess: (r) => {
+      toast.success(`${r.count} campo(s) gravado(s)`);
+      qc.invalidateQueries({ queryKey: ['request', request.id] });
+    },
+    onError: (e: any) => toast.error(apiError(e, 'Erro ao gravar campos')),
+  });
+
+  if (fields.length === 0) return null;
+
+  return (
+    <div className="border border-golplus-blue-200 bg-golplus-blue-50/40 rounded-xl p-5">
+      <h3 className="text-sm font-semibold text-golplus-blue-800 mb-3">Preencher dados desta etapa</h3>
+      <div className="space-y-4">
+        {fields.map((f) => (
+          <DynamicField
+            key={f.id}
+            field={f}
+            value={values[f.id] ?? ''}
+            onChange={(v) => setValues((prev) => ({ ...prev, [f.id]: v }))}
+          />
+        ))}
+      </div>
+      <button
+        onClick={() => save.mutate()}
+        disabled={save.isPending}
+        className="mt-4 px-4 py-2 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50"
+      >
+        {save.isPending ? 'Gravando...' : 'Gravar campos'}
+      </button>
+    </div>
+  );
+}
+
+// ===========================================================================
+// Painel de decisão rica do aprovador (POST /:id/decision).
+// Deferir | Indeferir | Solicitar correção | Solicitar info | Encaminhar.
+// ===========================================================================
+const DECISIONS = [
+  { action: 'DEFER', label: 'Deferir', cls: 'bg-green-600 hover:bg-green-700', needsReason: false },
+  { action: 'REJECT', label: 'Indeferir', cls: 'bg-red-600 hover:bg-red-700', needsReason: true },
+  { action: 'REQUEST_CORRECTION', label: 'Solicitar correção', cls: 'bg-golplus-orange-500 hover:bg-golplus-orange-600', needsReason: true },
+  { action: 'REQUEST_INFO', label: 'Solicitar info', cls: 'bg-amber-500 hover:bg-amber-600', needsReason: true },
+  { action: 'FORWARD', label: 'Encaminhar', cls: 'bg-golplus-blue-600 hover:bg-golplus-blue-700', needsReason: false },
+] as const;
+
+function DecisionPanel({ requestId }: { requestId: string }) {
+  const qc = useQueryClient();
+  const [action, setAction] = useState<string>('');
+  const [reason, setReason] = useState('');
+  const [forwardToUserId, setForwardToUserId] = useState('');
+  const current = DECISIONS.find((d) => d.action === action);
+  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: () => usersApi.getAll(), enabled: action === 'FORWARD' });
+
+  const decide = useMutation({
+    mutationFn: () =>
+      requestsApi.decision(requestId, {
+        action,
+        reason: reason.trim() || undefined,
+        forwardToUserId: action === 'FORWARD' && forwardToUserId ? forwardToUserId : undefined,
+      }),
+    onSuccess: () => {
+      toast.success('Decisão registrada');
+      setAction(''); setReason(''); setForwardToUserId('');
+      qc.invalidateQueries({ queryKey: ['request', requestId] });
+    },
+    onError: (e: any) => toast.error(apiError(e, 'Erro ao registrar decisão')),
+  });
+
+  const canSubmit = !!action
+    && !(current?.needsReason && !reason.trim())
+    && !(action === 'FORWARD' && !forwardToUserId);
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+      <h3 className="text-sm font-semibold text-gray-700 mb-3">Decisão da Etapa</h3>
+      <div className="flex flex-wrap gap-2 mb-3">
+        {DECISIONS.map((d) => (
+          <button
+            key={d.action}
+            onClick={() => setAction(d.action)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors ${d.cls} ${action === d.action ? 'ring-2 ring-offset-1 ring-gray-400' : 'opacity-90'}`}
+          >
+            {d.label}
+          </button>
+        ))}
+      </div>
+      {action && (
+        <div className="space-y-3">
+          {action === 'FORWARD' && (
+            <select
+              value={forwardToUserId}
+              onChange={(e) => setForwardToUserId(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
+            >
+              <option value="">— Encaminhar para… —</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.name} ({roleLabel(u.role)})</option>
+              ))}
+            </select>
+          )}
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={current?.needsReason ? 'Motivo (obrigatório)' : 'Observação (opcional)'}
+            rows={2}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
+          />
+          <button
+            onClick={() => decide.mutate()}
+            disabled={!canSubmit || decide.isPending}
+            className="px-4 py-2 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50"
+          >
+            {decide.isPending ? 'Registrando...' : `Confirmar: ${current?.label}`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===========================================================================
+// Compra vinculada (subfluxo PURCHASE com parentRequestId) + lista de filhos.
+// ===========================================================================
+function LinkedPurchasePanel({ request }: { request: Request }) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [flowId, setFlowId] = useState('');
+  const [title, setTitle] = useState(`Compra — ${request.title}`);
+  const { data: flows = [] } = useQuery({ queryKey: ['flows'], queryFn: () => flowsApi.getAll(), enabled: open });
+  const purchaseFlows = flows.filter((f) => f.type === 'PURCHASE' && f.isActive);
+
+  const create = useMutation({
+    mutationFn: () => requestsApi.create({ flowId, title: title.trim(), parentRequestId: request.id }),
+    onSuccess: (child: any) => {
+      toast.success('Compra vinculada criada');
+      qc.invalidateQueries({ queryKey: ['request', request.id] });
+      navigate(`/requests/${child.id}`);
+    },
+    onError: (e: any) => toast.error(apiError(e, 'Erro ao criar compra vinculada')),
+  });
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-700">Compras vinculadas</h3>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="text-sm text-golplus-blue-600 hover:text-golplus-blue-800 font-medium"
+        >
+          {open ? 'Fechar' : '+ Abrir compra vinculada'}
+        </button>
+      </div>
+
+      {open && (
+        <div className="border border-gray-200 rounded-lg p-4 mb-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Título</label>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Fluxo de compra</label>
+            <select
+              value={flowId}
+              onChange={(e) => setFlowId(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
+            >
+              <option value="">{purchaseFlows.length ? '— Selecionar fluxo —' : 'Nenhum fluxo de compra disponível'}</option>
+              {purchaseFlows.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={() => create.mutate()}
+            disabled={!flowId || !title.trim() || create.isPending}
+            className="px-4 py-2 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50"
+          >
+            {create.isPending ? 'Criando...' : 'Criar compra vinculada'}
+          </button>
+        </div>
+      )}
+
+      {request.children && request.children.length > 0 ? (
+        <ul className="divide-y divide-gray-100 border border-gray-200 rounded-lg overflow-hidden">
+          {request.children.map((c) => (
+            <li key={c.id} className="flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50">
+              <Link to={`/requests/${c.id}`} className="text-sm text-golplus-blue-700 hover:text-golplus-blue-900">
+                {c.title}
+              </Link>
+              <div className="flex items-center gap-2">
+                {c.flow?.type && <FlowTypeBadge type={c.flow.type} />}
+                <StatusBadge status={c.status} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-gray-500">Nenhuma compra vinculada.</p>
+      )}
+    </div>
+  );
+}
+
 export default function RequestDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'details' | 'tasks' | 'approvals' | 'attachments' | 'comments' | 'audit'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'trail' | 'tasks' | 'approvals' | 'attachments' | 'comments' | 'audit'>('details');
   const [modal, setModal] = useState<'approve' | 'reject' | null>(null);
 
   const { data: request, isLoading } = useQuery({
@@ -188,6 +500,22 @@ export default function RequestDetail() {
     onSuccess: () => { toast.success('Solicitação cancelada'); navigate('/requests'); },
     onError: () => toast.error('Erro ao cancelar'),
   });
+  const claimMutation = useMutation({
+    mutationFn: (taskId: string) => tasksApi.claim(taskId),
+    onSuccess: () => { toast.success('Tarefa assumida'); qc.invalidateQueries({ queryKey: ['request', id] }); },
+    onError: (e: any) => toast.error(apiError(e, 'Não foi possível assumir a tarefa')),
+  });
+  const completeMutation = useMutation({
+    mutationFn: (taskId: string) => tasksApi.complete(taskId),
+    onSuccess: () => { toast.success('Etapa concluída!'); qc.invalidateQueries({ queryKey: ['request', id] }); },
+    // 400 = campo/checklist obrigatório pendente — mostra a mensagem do servidor.
+    onError: (e: any) => toast.error(apiError(e, 'Não foi possível concluir a etapa')),
+  });
+  const resubmitMutation = useMutation({
+    mutationFn: () => requestsApi.resubmit(id!),
+    onSuccess: () => { toast.success('Solicitação reenviada'); qc.invalidateQueries({ queryKey: ['request', id] }); },
+    onError: (e: any) => toast.error(apiError(e, 'Erro ao reenviar')),
+  });
 
   const handleUpload = async (files: File[]) => {
     try {
@@ -205,9 +533,32 @@ export default function RequestDetail() {
   const canApprove = ['ADMIN', 'MANAGER', 'FINANCE'].includes(user?.role || '');
   const canCancel = user?.id === request.initiatorId || user?.role === 'ADMIN';
   const isActive = !['COMPLETED', 'CANCELLED', 'REJECTED'].includes(request.status);
+  const isInitiator = user?.id === request.initiatorId;
+  const isAwaitingCorrection = request.status === 'AWAITING_CORRECTION';
+
+  // Etapa corrente do fluxo e a tarefa aberta do usuário nela (se houver).
+  const currentStep: FlowStep | undefined = request.flow?.steps?.find((s) => s.order === request.currentStep);
+  const myTasksHere: RequestTask[] = (request.tasks ?? []).filter(
+    (t) => t.assigneeId === user?.id && t.step?.order === request.currentStep,
+  );
+  const myOpenTask = myTasksHere.find((t) => t.status === 'PENDING' || t.status === 'IN_PROGRESS');
+  const isResponsible = !!myOpenTask;
+  // Tarefa de fila ainda não assumida (PENDING) → oferece "Assumir".
+  const claimableTask = myOpenTask?.status === 'PENDING' ? myOpenTask : undefined;
+  // Aprovador da etapa: a etapa corrente tem níveis de autorização e o usuário pode aprovar.
+  const stepHasApproval = (currentStep?.authLevels?.length ?? 0) > 0;
+  const showDecisionPanel = isActive && stepHasApproval && canApprove;
+
+  // Há campos dinâmicos obrigatórios sem valor na etapa corrente (e sou o responsável)?
+  const currentFieldValueIds = new Set((request.fieldValues ?? []).map((v) => v.fieldId));
+  const missingRequiredField = (currentStep?.formFields ?? []).some(
+    (f) => f.required && !currentFieldValueIds.has(f.id),
+  );
+  const canFillFields = isResponsible && (currentStep?.formFields?.length ?? 0) > 0;
 
   const tabs = [
     { id: 'details', label: 'Detalhes' },
+    { id: 'trail', label: 'Trilha' },
     { id: 'tasks', label: `Tarefas (${request.tasks?.length || 0})` },
     { id: 'approvals', label: `Aprovações (${request.approvals?.length || 0})` },
     { id: 'attachments', label: `Anexos (${request.attachments?.length || 0})` },
@@ -232,16 +583,39 @@ export default function RequestDetail() {
         </Link>
         <div className="flex items-start justify-between gap-4">
           <div>
+            {request.parentRequestId && (
+              <Link to={`/requests/${request.parentRequestId}`} className="text-xs text-golplus-blue-600 hover:text-golplus-blue-800 mb-1 inline-block">
+                ↳ Subfluxo vinculado — ver solicitação principal
+              </Link>
+            )}
             <h1 className="text-2xl font-bold text-gray-900">{request.title}</h1>
-            <div className="flex items-center gap-3 mt-2">
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              {/* Rótulo humano da etapa em destaque (statusLabel) + status de máquina. */}
+              {request.statusLabel && (
+                <span className="inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold bg-golplus-blue-600 text-white">
+                  {request.statusLabel}
+                </span>
+              )}
               <StatusBadge status={request.status} size="md" />
               <FlowTypeBadge type={request.flow?.type} />
               <span className="text-sm text-gray-500">por {request.initiator?.name}</span>
               <span className="text-sm text-gray-400">{format(new Date(request.createdAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</span>
             </div>
           </div>
-          <div className="flex gap-2 flex-shrink-0">
-            {canApprove && isActive && (
+          <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
+            {/* Responsável da etapa corrente: assumir (fila) e concluir. */}
+            {claimableTask && (
+              <button onClick={() => claimMutation.mutate(claimableTask.id)} disabled={claimMutation.isPending} className="px-4 py-2 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50">Assumir</button>
+            )}
+            {myOpenTask && myOpenTask.status === 'IN_PROGRESS' && (
+              <button onClick={() => completeMutation.mutate(myOpenTask.id)} disabled={completeMutation.isPending} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">Concluir etapa</button>
+            )}
+            {/* Iniciador, quando aguardando correção: reenviar. */}
+            {isInitiator && isAwaitingCorrection && (
+              <button onClick={() => resubmitMutation.mutate()} disabled={resubmitMutation.isPending} className="px-4 py-2 bg-golplus-orange-500 text-white rounded-lg text-sm font-medium hover:bg-golplus-orange-600 disabled:opacity-50">Reenviar</button>
+            )}
+            {/* Aprovação simples (compatibilidade) quando a etapa não usa decisão rica. */}
+            {canApprove && isActive && !stepHasApproval && (
               <>
                 <button onClick={() => setModal('approve')} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700">Aprovar</button>
                 <button onClick={() => setModal('reject')} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">Rejeitar</button>
@@ -258,21 +632,41 @@ export default function RequestDetail() {
       <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
         <h3 className="text-sm font-semibold text-gray-700 mb-4">Progresso do Fluxo</h3>
         <div className="flex items-center gap-2 overflow-x-auto pb-2">
-          {request.flow?.steps?.map((step, idx) => (
-            <div key={step.id} className="flex items-center gap-2 flex-shrink-0">
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
-                idx < request.currentStep ? 'bg-green-100 text-green-800' :
-                idx === request.currentStep ? 'bg-golplus-blue-100 text-golplus-blue-800 font-medium' :
-                'bg-gray-100 text-gray-500'
-              }`}>
-                <span>{idx < request.currentStep ? '✓' : idx === request.currentStep ? '→' : `${idx + 1}`}</span>
-                <span>{step.name}</span>
-              </div>
-              {idx < (request.flow?.steps?.length || 0) - 1 && <span className="text-gray-300">→</span>}
-            </div>
-          ))}
+          {(() => {
+            // Etapas EFETIVAMENTE percorridas (têm tarefa criada) ou com aprovação
+            // registrada — usado para distinguir "concluída" de "pulada" (branch).
+            const visited = new Set<number>();
+            (request.tasks ?? []).forEach((t) => { if (t.step?.order != null) visited.add(t.step.order); });
+            (request.approvals ?? []).forEach((a) => { if (a.stepOrder != null) visited.add(a.stepOrder); });
+            const steps = request.flow?.steps ?? [];
+            return steps.map((step, idx) => {
+              // Comparar por ORDER (não pelo índice): os orders são espaçados (0/10/.../80).
+              const isCurrent = step.order === request.currentStep;
+              const isPast = step.order < request.currentStep;
+              const isDone = isPast && visited.has(step.order);
+              const isSkipped = isPast && !visited.has(step.order);
+              const cls = isDone ? 'bg-green-100 text-green-800'
+                : isCurrent ? 'bg-golplus-blue-100 text-golplus-blue-800 font-medium'
+                : isSkipped ? 'bg-gray-50 text-gray-400 border border-dashed border-gray-300'
+                : 'bg-gray-100 text-gray-500';
+              const icon = isDone ? '✓' : isCurrent ? '→' : isSkipped ? '⤼' : `${idx + 1}`;
+              return (
+                <div key={step.id} className="flex items-center gap-2 flex-shrink-0">
+                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${cls}`}>
+                    <span>{icon}</span>
+                    <span>{step.name}</span>
+                    {isSkipped && <span className="text-[10px] uppercase tracking-wide">(pulada)</span>}
+                  </div>
+                  {idx < steps.length - 1 && <span className="text-gray-300">→</span>}
+                </div>
+              );
+            });
+          })()}
         </div>
       </div>
+
+      {/* Painel de decisão rica do aprovador na etapa corrente. */}
+      {showDecisionPanel && <DecisionPanel requestId={request.id} />}
 
       {/* Tabs */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -298,7 +692,12 @@ export default function RequestDetail() {
                 <dl className="space-y-2">
                   <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Fluxo:</dt><dd className="text-sm text-gray-900">{request.flow?.name}</dd></div>
                   <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Solicitante:</dt><dd className="text-sm text-gray-900">{request.initiator?.name}</dd></div>
-                  <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Etapa atual:</dt><dd className="text-sm text-gray-900">{request.currentStep + 1} de {request.flow?.steps?.length}</dd></div>
+                  <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Etapa atual:</dt><dd className="text-sm text-gray-900">{(() => {
+                    const steps = request.flow?.steps ?? [];
+                    const pos = steps.findIndex((s) => s.order === request.currentStep);
+                    const nome = currentStep?.name ? `${currentStep.name} — ` : '';
+                    return pos >= 0 ? `${nome}passo ${pos + 1} de ${steps.length}` : (request.statusLabel || request.status);
+                  })()}</dd></div>
                   {request.description && <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Descrição:</dt><dd className="text-sm text-gray-900">{request.description}</dd></div>}
                 </dl>
               </div>
@@ -328,6 +727,48 @@ export default function RequestDetail() {
                   </div>
                 </div>
               )}
+              {/* Campos dinâmicos preenchidos (JÁ mascarados pelo servidor). */}
+              {request.fieldValues && request.fieldValues.length > 0 && (
+                <div className="md:col-span-2">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Dados do Formulário</h3>
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                    {request.fieldValues.map((fv) => (
+                      <div key={fv.id} className="flex">
+                        <dt className="text-sm text-gray-500 w-40 flex-shrink-0">
+                          {fv.field.label}
+                          {fv.field.sensitiveType && <span className="ml-1 text-gray-300" title="Dado sensível">🔒</span>}:
+                        </dt>
+                        <dd className="text-sm text-gray-900 break-all">{displayFieldValue(fv)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'trail' && (
+            <div className="space-y-8">
+              {/* Preenchimento de campos da etapa corrente (quando responsável). */}
+              {canFillFields && currentStep && (
+                <div>
+                  {missingRequiredField && (
+                    <p className="text-sm text-golplus-orange-600 mb-3">Há campos obrigatórios pendentes nesta etapa.</p>
+                  )}
+                  <DynamicFieldsFill request={request} step={currentStep} />
+                </div>
+              )}
+
+              {/* Checklist por etapa (itens applicable), com toggle p/ o responsável. */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Checklist</h3>
+                <ChecklistSection request={request} canEdit={isResponsible || user?.role === 'ADMIN'} />
+              </div>
+
+              {/* Compras vinculadas (subfluxo) + filhos. */}
+              <div className="border-t border-gray-100 pt-6">
+                <LinkedPurchasePanel request={request} />
+              </div>
             </div>
           )}
 

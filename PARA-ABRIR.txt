@@ -1,0 +1,58 @@
+========================================================
+  APROVA — Como abrir no seu notebook (host temporário)
+========================================================
+
+PRÉ-REQUISITO (uma única vez): instalar o Node.js
+  • Baixe a versão "LTS" em:  https://nodejs.org/pt-br/download
+  • Instale normalmente (Avançar > Avançar > Concluir).
+  • Os atalhos abaixo avisam e abrem essa página se faltar.
+
+--------------------------------------------------------
+  ABRIR O SISTEMA — dê DOIS CLIQUES no atalho do seu sistema:
+--------------------------------------------------------
+  • Windows ........  start-windows.bat
+  • Mac (macOS) ....  start-mac.command
+  • Linux ..........  start-linux.sh
+
+O que acontece ao abrir (primeira vez demora alguns minutos;
+nas próximas é rápido):
+  1. prepara a configuração e o banco de dados
+  2. cria os dados de demonstração
+  3. compila e sobe o sistema
+  4. abre o navegador em  http://localhost:3001
+
+Deixe a janela preta (terminal) ABERTA enquanto estiver usando.
+Para ENCERRAR o sistema, feche essa janela.
+
+--------------------------------------------------------
+  ACESSAR DE OUTROS COMPUTADORES DA REDE (opcional)
+--------------------------------------------------------
+Enquanto o sistema estiver aberto no notebook, outras pessoas na
+mesma rede podem acessar pelo IP do notebook:
+      http://<IP-DO-NOTEBOOK>:3001
+(Descubra o IP: Windows "ipconfig" / Mac-Linux "ifconfig".
+ Pode ser necessário liberar a porta 3001 no firewall.)
+
+--------------------------------------------------------
+  USUÁRIOS DE DEMONSTRAÇÃO (senha: senha123)
+--------------------------------------------------------
+  admin@aprova.com ........ Administrador (usuários, auditoria, relatórios)
+  joao@aprova.com ......... Usuário comum (abre solicitações)
+  gestor@aprova.com ....... Gestor (aprova / alçada por valor)
+  financeiro@aprova.com ... Financeiro
+  rh@aprova.com ........... RH (admissão / desligamento / inventário)
+
+ATENÇÃO: estes são dados de DEMONSTRAÇÃO, para testes e apresentação.
+Para uso real (produção), siga o arquivo DEPLOY.md (cria um único
+administrador a partir de e-mail/senha definidos por você, sem
+contas de demonstração).
+
+--------------------------------------------------------
+  PROBLEMAS?
+--------------------------------------------------------
+  • "Node.js não encontrado": instale o Node LTS (link acima) e
+    dê dois cliques no atalho de novo.
+  • No Mac, se aparecer aviso de "desenvolvedor não identificado":
+    clique com o botão direito em start-mac.command > Abrir > Abrir.
+  • Porta 3001 ocupada: feche outras janelas do sistema e tente de novo.
+  • Qualquer erro na janela preta: me mande o texto que eu ajudo.

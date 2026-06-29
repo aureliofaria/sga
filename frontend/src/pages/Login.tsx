@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import Logo from '../components/Logo';
 import toast from 'react-hot-toast';
 
 export default function Login() {
@@ -28,10 +29,10 @@ export default function Login() {
     <div className="min-h-screen bg-gradient-to-br from-golplus-blue-700 to-golplus-blue-900 flex items-center justify-center px-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-golplus-blue-600 rounded-2xl mb-4">
-            <span className="text-white font-bold text-2xl">SGA</span>
+          <div className="flex justify-center mb-4">
+            <Logo showApprova={false} />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Sistema de Gestão de Aprovações</h1>
+          <h1 className="text-2xl font-bold text-gray-900">APROVA</h1>
           <p className="text-gray-500 text-sm mt-2">Acesse sua conta para continuar</p>
         </div>
 
@@ -71,11 +72,11 @@ export default function Login() {
           <p className="text-xs text-gray-500 font-medium mb-2">Usuários de demonstração:</p>
           <div className="space-y-1">
             {[
-              ['admin@sga.com', 'ADMIN'],
-              ['rh@sga.com', 'RH'],
-              ['financeiro@sga.com', 'Financeiro'],
-              ['gestor@sga.com', 'Gestor'],
-              ['joao@sga.com', 'Usuário'],
+              ['admin@aprova.com', 'ADMIN'],
+              ['rh@aprova.com', 'RH'],
+              ['financeiro@aprova.com', 'Financeiro'],
+              ['gestor@aprova.com', 'Gestor'],
+              ['joao@aprova.com', 'Usuário'],
             ].map(([e, r]) => (
               <button
                 key={e}

@@ -1,5 +1,5 @@
 {
-  "name": "sga-frontend",
+  "name": "aprova-frontend",
   "version": "1.0.0",
   "scripts": {
     "dev": "vite",

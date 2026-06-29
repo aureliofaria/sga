@@ -107,7 +107,9 @@ export default function Dashboard() {
                     <p className="text-xs text-gray-500 mt-0.5">{req.initiator?.name} · {req.flow?.name}</p>
                   </div>
                   <div className="ml-4 flex items-center gap-2 flex-shrink-0">
-                    <StatusBadge status={req.status} />
+                    {req.statusLabel
+                      ? <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-golplus-blue-100 text-golplus-blue-800" title={req.status}>{req.statusLabel}</span>
+                      : <StatusBadge status={req.status} />}
                   </div>
                 </div>
               </Link>

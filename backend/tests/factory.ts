@@ -25,11 +25,20 @@ export async function resetDb() {
   await prisma.approval.deleteMany();
   await prisma.requestTask.deleteMany();
   await prisma.requestResource.deleteMany();
+  await prisma.requestFieldValue.deleteMany();
+  await prisma.requestChecklistItem.deleteMany();
   await prisma.request.deleteMany();
   await prisma.authorizationLevel.deleteMany();
+  await prisma.formField.deleteMany();
+  await prisma.checklistItem.deleteMany();
   await prisma.flowStep.deleteMany();
   await prisma.flowTemplate.deleteMany();
   await prisma.resourceItem.deleteMany();
+  // Parâmetros financeiros (Fase 0 · Passo 12): saem ANTES de sector/sectorMember
+  // (FinanceParam.sectorId → Sector com onDelete: Cascade; auditoria é independente).
+  await prisma.financeParamAuditLog.deleteMany();
+  await prisma.financeParam.deleteMany();
+  await prisma.delegationAuditLog.deleteMany();
   await prisma.sectorMember.deleteMany();
   await prisma.request.deleteMany();
   await prisma.user.deleteMany();
@@ -51,6 +60,15 @@ interface StepSpec {
   conditions?: unknown;
   authLevels?: { name: string; minValueCents?: number | null; maxValueCents?: number | null; requiredApprovers: number; approverRole: string }[];
   activateOnSectorId?: string | null;
+  // Fase 0 · Passo 10: rótulo de exibição opcional para a etapa.
+  statusLabel?: string | null;
+  // Fase 0 · Passo 11: setor que trata a etapa (resolução do Líder I) e overrides
+  // opcionais da cadência de escalonamento.
+  handlingSectorId?: string | null;
+  slaExpiry?: string;
+  escalationDay1?: number | null;
+  escalationDay2?: number | null;
+  escalationDay3?: number | null;
 }
 
 // Cria um FlowTemplate com etapas (e níveis de alçada) e retorna o template.
@@ -65,6 +83,12 @@ export async function makeFlow(type: string, steps: StepSpec[]) {
         requiredRole: s.requiredRole ?? null,
         conditions: s.conditions ? JSON.stringify(s.conditions) : null,
         activateOnSectorId: s.activateOnSectorId ?? null,
+        statusLabel: s.statusLabel ?? null,
+        handlingSectorId: s.handlingSectorId ?? null,
+        slaExpiry: s.slaExpiry ?? undefined,
+        escalationDay1: s.escalationDay1 ?? null,
+        escalationDay2: s.escalationDay2 ?? null,
+        escalationDay3: s.escalationDay3 ?? null,
       },
     });
     for (const lvl of s.authLevels ?? []) {

@@ -19,20 +19,32 @@ const navItems = [
   { path: '/audit', label: 'Auditoria', icon: '🔎', roles: ['ADMIN'] },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  /** Orientação da logo na barra de marca (vertical no drawer mobile). */
+  orientation?: 'horizontal' | 'vertical';
+  /** Chamado ao clicar num item (fecha o drawer no mobile). */
+  onNavigate?: () => void;
+}
+
+export default function Sidebar({ orientation = 'horizontal', onNavigate }: SidebarProps) {
   const { user, logout } = useAuth();
   const { data: unread = 0 } = useQuery({
     queryKey: ['notif-unread'],
     queryFn: notificationsApi.unreadCount,
     refetchInterval: 60000,
   });
+  const isVertical = orientation === 'vertical';
 
   return (
-    <div className="flex flex-col w-60 min-h-screen bg-gradient-to-b from-golplus-blue to-golplus-blue-800">
+    <div className="flex flex-col w-60 min-h-screen bg-golplus-blue">
       {/* Brand */}
-      <div className="px-5 py-5 border-b border-white/10">
-        <Logo variant="white" />
-        <div className="text-golplus-blue-100 text-xs mt-2">Gestão de Aprovações e Fluxos</div>
+      <div className={`px-5 py-6 border-b border-white/10 ${isVertical ? 'text-center' : ''}`}>
+        <Logo
+          variant="white"
+          orientation={orientation}
+          imgClassName={isVertical ? 'h-20 w-auto object-contain' : 'h-11 w-auto object-contain'}
+        />
+        <div className="text-golplus-blue-100 text-xs mt-2">Aprovações e fluxos de trabalho</div>
       </div>
 
       {/* Navigation */}
@@ -43,6 +55,7 @@ export default function Sidebar() {
             <NavLink
               key={item.path}
               to={item.path}
+              onClick={onNavigate}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors border-l-4 ${
                   isActive

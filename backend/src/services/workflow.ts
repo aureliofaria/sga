@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
-import { notify } from './notifications';
+import { notify, notifyMany } from './notifications';
+import { isFunctionRole, resolveQueueEligibles } from '../lib/queue';
 
 // Aceita tanto o cliente normal quanto um cliente de transação, permitindo que as
 // funções de workflow sejam compostas dentro de uma transação atômica.
@@ -40,6 +41,22 @@ function evaluateNextOrder(
   return null;
 }
 
+// Rodada ATIVA de decisão de uma etapa. Reenvios após correção abrem nova rodada
+// sem criar Approval, então a rodada ativa não é simplesmente o MAX(round) das
+// aprovações: se a maior rodada já terminou em CORRECTION_REQUESTED (ou seja, foi
+// devolvida e reenviada), a rodada ativa é MAX(round)+1. As decisões da etapa são
+// sempre gravadas/contadas nesta rodada — decisões de rodadas anteriores não contam.
+export async function activeRound(db: Db, requestId: string, stepOrder: number): Promise<number> {
+  const approvals = await db.approval.findMany({
+    where: { requestId, stepOrder },
+    select: { round: true, decision: true },
+  });
+  if (approvals.length === 0) return 0;
+  const maxRound = approvals.reduce((m, a) => Math.max(m, a.round), 0);
+  const correctionAtMax = approvals.some(a => a.round === maxRound && a.decision === 'CORRECTION_REQUESTED');
+  return correctionAtMax ? maxRound + 1 : maxRound;
+}
+
 export async function createRequestTasks(requestId: string, flowId: string, stepOrder: number = 0, db: Db = prisma) {
   const [flow, resources, request] = await Promise.all([
     db.flowTemplate.findUnique({
@@ -64,16 +81,47 @@ export async function createRequestTasks(requestId: string, flowId: string, step
       if (!hasResource) continue;
     }
 
+    // Etapa de SUBMISSÃO/REQUISIÇÃO (o próprio iniciador executa a sua parte):
+    // não tem alçada (authLevels) E o papel requerido é ausente ou o papel-base
+    // 'USER' (catch-all). Antes, um requiredRole='USER' difundia a tarefa a TODOS
+    // os usuários do papel (resíduo de IDOR de leitura) — agora a tarefa dessa
+    // etapa recai SOMENTE no iniciador, sem broadcast indiscriminado.
+    //
+    // Etapas de APROVAÇÃO (com authLevels) ou de uma FUNÇÃO específica
+    // (requiredRole ≠ 'USER', ex.: MANAGER/FINANCE/HR/TI/...) mantêm a segregação
+    // de funções (SoD): atribuídas a TODOS os outros usuários do papel, EXCLUINDO
+    // o iniciador; recai sobre o iniciador apenas quando ele é o único do papel.
+    const initiator = await db.user.findUnique({
+      where: { id: request.initiatorId },
+      select: { id: true, name: true },
+    });
+
+    const hasAuthLevels = step.authLevels.length > 0;
+    const isSelfSubmissionStep = !hasAuthLevels && (!step.requiredRole || step.requiredRole === 'USER');
+    // Etapa de FUNÇÃO (fila): requiredRole ∈ FUNCTION_ROLES. A resolução por
+    // hierarquia (MEMBRO→LÍDER II→LÍDER I; Diretoria = qualquer diretor) faz o
+    // fan-out: cada elegível recebe a SUA tarefa PENDING e "assume" na própria
+    // linha. Papéis legados (MANAGER/FINANCE/HR/USER) seguem o caminho atual.
+    const isFunctionStep = isFunctionRole(step.requiredRole);
+
     let assignees: { id: string; name: string }[] = [];
-    if (step.requiredRole) {
-      assignees = await db.user.findMany({
-        where: { role: step.requiredRole, isActive: true, id: { not: request.initiatorId } },
-        select: { id: true, name: true },
-      });
-    }
-    if (assignees.length === 0) {
-      const initiator = await db.user.findUnique({ where: { id: request.initiatorId }, select: { id: true, name: true } });
+    if (isSelfSubmissionStep) {
+      // Submissão do iniciador: só o iniciador, sem difundir ao papel inteiro.
       if (initiator) assignees = [initiator];
+    } else if (isFunctionStep) {
+      // Fila de função: já inclui fallback hierárquico e fallback ao iniciador.
+      assignees = await resolveQueueEligibles(db, step, request.initiatorId);
+    } else {
+      if (step.requiredRole) {
+        assignees = await db.user.findMany({
+          where: { role: step.requiredRole, isActive: true, id: { not: request.initiatorId } },
+          select: { id: true, name: true },
+        });
+      }
+      // Sem outros do papel (ou etapa sem papel): recai sobre o iniciador.
+      if (assignees.length === 0 && initiator) {
+        assignees = [initiator];
+      }
     }
 
     const dueDate = step.deadlineHours ? new Date(Date.now() + step.deadlineHours * 60 * 60 * 1000) : null;
@@ -91,8 +139,12 @@ export async function createRequestTasks(requestId: string, flowId: string, step
         },
       });
       // Notifica o responsável sobre a nova tarefa (exceto o próprio iniciador).
+      // Em etapas de fila, o texto sinaliza que é preciso ASSUMIR para trabalhar.
       if (assignee.id !== request.initiatorId) {
-        await notify(db, { userId: assignee.id, type: 'TASK_ASSIGNED', title: 'Nova tarefa atribuída', body: `Você tem uma tarefa em "${request.title}": ${step.name}.`, requestId });
+        const body = isFunctionStep
+          ? `Tarefa na fila — assuma para trabalhar em "${request.title}": ${step.name}.`
+          : `Você tem uma tarefa em "${request.title}": ${step.name}.`;
+        await notify(db, { userId: assignee.id, type: 'TASK_ASSIGNED', title: 'Nova tarefa atribuída', body, requestId });
       }
       tasksCreated++;
     }
@@ -122,7 +174,7 @@ export async function processSlaExpiries(): Promise<number> {
         include: {
           handlingSector: {
             include: {
-              members: { where: { role: 'LIDER' }, include: { user: { select: { id: true, name: true } } } },
+              members: { where: { level: 'LIDER_1' }, include: { user: { select: { id: true, name: true } } } },
             },
           },
         },
@@ -176,6 +228,222 @@ export async function processSlaExpiries(): Promise<number> {
   }
 
   return expiredTasks.length;
+}
+
+// ===========================================================================
+// Escalonamento temporal (Fase 0 · Passo 11)
+//
+// Independente do SLA por prazo (dueDate), o escalonamento dispara por IDADE da
+// tarefa (dias desde createdAt), em três estágios de severidade crescente:
+//   Estágio 1 (≥ day1, padrão 2 dias): lembra o responsável.
+//   Estágio 2 (≥ day2, padrão 3 dias): aciona o Líder I do setor + o responsável.
+//   Estágio 3 (≥ day3, padrão 7 dias): transfere ao Líder I (se houver), marca
+//     slaEscalated e notifica responsável anterior + líder + iniciador.
+// A cadência é configurável por etapa via FlowStep.escalationDay1/2/3 (overrides).
+// A guarda escalationStage < N garante idempotência. Cada execução dispara
+// no máximo UM estágio (o mais severo ainda não disparado).
+// ===========================================================================
+
+const DIA_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_ESCALATION_DAYS = { d1: 2, d2: 3, d3: 7 } as const;
+
+// Resolve o Líder I do setor que trata a etapa (hierarquia Fase 0: level
+// 'LIDER_1', NÃO o papel legado role 'LIDER'). Retorna null se não houver.
+async function resolveStepLeader(
+  handlingSectorId: string | null | undefined
+): Promise<{ id: string; name: string } | null> {
+  if (!handlingSectorId) return null;
+  const leader = await prisma.sectorMember.findFirst({
+    where: { sectorId: handlingSectorId, level: 'LIDER_1' },
+    include: { user: { select: { id: true, name: true } } },
+  });
+  return leader ? { id: leader.user.id, name: leader.user.name } : null;
+}
+
+// Sufixo com a justificativa de atraso, quando registrada — anexado ao corpo das
+// notificações dos estágios 1 e 2 para dar contexto a quem é acionado.
+function justificationSuffix(justification: string | null | undefined): string {
+  return justification ? ` Justificativa do atraso: "${justification}".` : '';
+}
+
+interface EscalationTask {
+  id: string;
+  requestId: string;
+  title: string;
+  assigneeId: string;
+  escalationStage: number;
+  delayJustification: string | null;
+  assignee: { id: string; name: string };
+  request: { id: string; title: string; initiator: { id: string; name: string } };
+  step: {
+    escalationDay1: number | null;
+    escalationDay2: number | null;
+    escalationDay3: number | null;
+    handlingSectorId: string | null;
+  };
+}
+
+// Estágio 1: lembra o responsável (TASK_DELAY_REMINDER). Idempotente via guarda
+// escalationStage < 1 no updateMany dentro da transação.
+async function applyStage1(task: EscalationTask): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const upd = await tx.requestTask.updateMany({
+      where: { id: task.id, escalationStage: { lt: 1 } },
+      data: { escalationStage: 1 },
+    });
+    if (upd.count === 0) return false;
+    await notify(tx, {
+      userId: task.assigneeId,
+      type: 'TASK_DELAY_REMINDER',
+      title: 'Tarefa atrasada — lembrete',
+      body: `A tarefa "${task.title}" em "${task.request.title}" está atrasada.` + justificationSuffix(task.delayJustification),
+      requestId: task.requestId,
+    });
+    await tx.auditLog.create({
+      data: {
+        requestId: task.requestId, userId: 'system', userName: 'Sistema',
+        action: 'ESCALATION_STAGE_1',
+        details: `Escalonamento estágio 1 — lembrete ao responsável ${task.assignee.name} sobre a tarefa "${task.title}"`,
+      },
+    });
+    return true;
+  });
+}
+
+// Estágio 2: aciona o Líder I do setor + o responsável. Sem líder, notifica só o
+// responsável. Idempotente via guarda escalationStage < 2.
+async function applyStage2(task: EscalationTask): Promise<boolean> {
+  const leader = await resolveStepLeader(task.step.handlingSectorId);
+  return prisma.$transaction(async (tx) => {
+    const upd = await tx.requestTask.updateMany({
+      where: { id: task.id, escalationStage: { lt: 2 } },
+      data: { escalationStage: 2 },
+    });
+    if (upd.count === 0) return false;
+    const suffix = justificationSuffix(task.delayJustification);
+    if (leader) {
+      await notify(tx, {
+        userId: leader.id,
+        type: 'TASK_ESCALATED_TO_LEADER',
+        title: 'Tarefa escalonada à liderança',
+        body: `A tarefa "${task.title}" em "${task.request.title}" segue atrasada com ${task.assignee.name}.` + suffix,
+        requestId: task.requestId,
+      });
+    }
+    await notify(tx, {
+      userId: task.assigneeId,
+      type: 'TASK_DELAY_REMINDER',
+      title: 'Tarefa atrasada — escalonada',
+      body: `A tarefa "${task.title}" em "${task.request.title}" foi escalonada à liderança.` + suffix,
+      requestId: task.requestId,
+    });
+    await tx.auditLog.create({
+      data: {
+        requestId: task.requestId, userId: 'system', userName: 'Sistema',
+        action: 'ESCALATION_STAGE_2',
+        details: leader
+          ? `Escalonamento estágio 2 — acionado o líder ${leader.name} sobre a tarefa "${task.title}"`
+          : `Escalonamento estágio 2 — sem líder no setor; responsável ${task.assignee.name} notificado sobre a tarefa "${task.title}"`,
+      },
+    });
+    return true;
+  });
+}
+
+// Estágio 3: transfere ao Líder I (se houver; senão mantém), marca slaEscalated,
+// notifica responsável anterior + líder + iniciador. Retorna o novo assigneeId
+// quando houve transferência (para o evento de workflow). Idempotente via guarda
+// escalationStage < 3.
+async function applyStage3(task: EscalationTask): Promise<{ applied: boolean; newAssigneeId: string | null }> {
+  const leader = await resolveStepLeader(task.step.handlingSectorId);
+  // Segregação de funções: NÃO transferir a tarefa ao próprio solicitante. Se o
+  // único líder do setor for o iniciador, trata-se como "sem destino válido" —
+  // o escalonamento ocorre (estágio 3, notificações), mas o responsável é mantido.
+  const initiatorIsLeader = !!leader && leader.id === task.request.initiator.id;
+  const effectiveLeader = initiatorIsLeader ? null : leader;
+  const newAssigneeId = effectiveLeader ? effectiveLeader.id : task.assigneeId;
+  const keepReason = initiatorIsLeader
+    ? 'líder do setor é o próprio solicitante (segregação de funções)'
+    : 'sem líder no setor';
+  const applied = await prisma.$transaction(async (tx) => {
+    const upd = await tx.requestTask.updateMany({
+      where: { id: task.id, escalationStage: { lt: 3 } },
+      data: { escalationStage: 3, slaEscalated: true, assigneeId: newAssigneeId },
+    });
+    if (upd.count === 0) return false;
+    await tx.auditLog.create({
+      data: {
+        requestId: task.requestId, userId: 'system', userName: 'Sistema',
+        action: 'ESCALATION_STAGE_3',
+        details: effectiveLeader
+          ? `Escalonamento estágio 3 — tarefa "${task.title}" transferida ao líder ${effectiveLeader.name}`
+          : `Escalonamento estágio 3 — tarefa "${task.title}" mantida com ${task.assignee.name} (${keepReason})`,
+      },
+    });
+    // Notifica responsável anterior, líder (se houver destino válido) e iniciador.
+    const recipients = [task.assigneeId, task.request.initiator.id];
+    if (effectiveLeader) recipients.push(effectiveLeader.id);
+    await notifyMany(tx, recipients, {
+      type: 'TASK_ESCALATED_TO_LEADER',
+      title: 'Tarefa escalonada — transferida',
+      body: effectiveLeader
+        ? `A tarefa "${task.title}" em "${task.request.title}" foi transferida ao líder ${effectiveLeader.name} por atraso prolongado.`
+        : `A tarefa "${task.title}" em "${task.request.title}" segue em atraso prolongado (${keepReason}).`,
+      requestId: task.requestId,
+    });
+    return true;
+  });
+  return { applied, newAssigneeId: applied && effectiveLeader ? newAssigneeId : null };
+}
+
+// Varre as tarefas elegíveis e dispara o estágio mais severo ainda não disparado.
+// `now` é injetável para tornar os testes determinísticos (sem timers reais).
+// Retorna a quantidade de tarefas que tiveram algum estágio aplicado.
+export async function processEscalations(now: Date = new Date()): Promise<number> {
+  const tasks = (await prisma.requestTask.findMany({
+    where: {
+      status: { in: ['PENDING', 'IN_PROGRESS'] },
+      slaEscalated: false,
+    },
+    select: {
+      id: true,
+      requestId: true,
+      title: true,
+      assigneeId: true,
+      escalationStage: true,
+      delayJustification: true,
+      createdAt: true,
+      assignee: { select: { id: true, name: true } },
+      request: { select: { id: true, title: true, initiator: { select: { id: true, name: true } } } },
+      step: {
+        select: { escalationDay1: true, escalationDay2: true, escalationDay3: true, handlingSectorId: true },
+      },
+    },
+  })) as (EscalationTask & { createdAt: Date })[];
+
+  let processed = 0;
+
+  for (const task of tasks) {
+    const ageDays = (now.getTime() - task.createdAt.getTime()) / DIA_MS;
+    const d1 = task.step.escalationDay1 ?? DEFAULT_ESCALATION_DAYS.d1;
+    const d2 = task.step.escalationDay2 ?? DEFAULT_ESCALATION_DAYS.d2;
+    const d3 = task.step.escalationDay3 ?? DEFAULT_ESCALATION_DAYS.d3;
+
+    // Dispara o estágio MAIS SEVERO ainda não disparado (um por execução).
+    if (ageDays >= d3 && task.escalationStage < 3) {
+      const { applied, newAssigneeId } = await applyStage3(task);
+      if (applied) {
+        await publishWorkflowEvent('TASK_ESCALATED', task.requestId, { stage: 3, newAssigneeId });
+        processed++;
+      }
+    } else if (ageDays >= d2 && task.escalationStage < 2) {
+      if (await applyStage2(task)) processed++;
+    } else if (ageDays >= d1 && task.escalationStage < 1) {
+      if (await applyStage1(task)) processed++;
+    }
+  }
+
+  return processed;
 }
 
 // Avança a solicitação para a próxima etapa (ou conclui) de forma atômica.
@@ -266,7 +534,9 @@ export async function advanceRequest(requestId: string) {
       include: { flow: { include: { steps: { orderBy: { order: 'asc' } } } } },
     });
     if (!request) return;
-    if (['COMPLETED', 'REJECTED', 'CANCELLED'].includes(request.status)) return;
+    // AWAITING_CORRECTION não avança: o pedido voltou ao solicitante e só segue
+    // após reenvio (resubmit), que restaura IN_PROGRESS na etapa de correção.
+    if (['COMPLETED', 'REJECTED', 'CANCELLED', 'AWAITING_CORRECTION'].includes(request.status)) return;
 
     const complete = await isStepComplete(requestId, request.currentStep, tx);
     if (!complete) return;
@@ -285,17 +555,23 @@ export async function advanceRequest(requestId: string) {
     const hasNextStep = nextStepOrder !== null && request.flow.steps.some(s => s.order === nextStepOrder);
 
     if (hasNextStep) {
+      // Fase 0 · Passo 10: busca o statusLabel da próxima etapa para denormalizar.
+      const nextStep = request.flow.steps.find(s => s.order === nextStepOrder!);
+      const nextStatusLabel = (nextStep as any)?.statusLabel ?? null;
+
       const upd = await tx.request.updateMany({
         where: { id: requestId, currentStep: request.currentStep },
-        data: { currentStep: nextStepOrder!, status: 'IN_PROGRESS' },
+        data: { currentStep: nextStepOrder!, status: 'IN_PROGRESS', statusLabel: nextStatusLabel },
       });
       if (upd.count === 0) return; // outra execução já avançou esta etapa
       await createRequestTasks(requestId, request.flowId, nextStepOrder!, tx);
       await applyResourceTransitions(request, request.currentStep, false, tx);
     } else {
+      // Fase 0 · Passo 10: ao concluir, zeramos o statusLabel — o status de máquina
+      // COMPLETED já comunica o estado; manter um rótulo de etapa seria enganoso.
       const upd = await tx.request.updateMany({
         where: { id: requestId, currentStep: request.currentStep, status: { notIn: ['COMPLETED', 'REJECTED', 'CANCELLED'] } },
-        data: { status: 'COMPLETED' },
+        data: { status: 'COMPLETED', statusLabel: null },
       });
       if (upd.count === 0) return;
       await applyResourceTransitions(request, request.currentStep, true, tx);
@@ -335,9 +611,12 @@ export async function isStepComplete(requestId: string, stepOrder: number, db: D
       if (!hasResource) continue;
     }
 
+    // Tarefas CANCELLED (irmãs perdedoras de uma fila assumida/concluída) não
+    // são COMPLETED e travariam a etapa — considerar apenas as NÃO-CANCELLED.
     const stepTasks = request.tasks.filter(t => t.stepId === step.id);
-    if (stepTasks.length === 0) return false;
-    if (!stepTasks.every(t => t.status === 'COMPLETED')) return false;
+    const activeTasks = stepTasks.filter(t => t.status !== 'CANCELLED');
+    if (activeTasks.length === 0) return false;
+    if (!activeTasks.every(t => t.status === 'COMPLETED')) return false;
 
     if (step.authLevels.length > 0) {
       const amount = request.amountCents ?? 0;
@@ -347,14 +626,33 @@ export async function isStepComplete(requestId: string, stepOrder: number, db: D
         const max = lvl.maxValueCents ?? Infinity;
         if (amount >= min && amount <= max) { required = lvl.requiredApprovers; break; }
       }
+      // Conta apenas aprovações (decision=APPROVED) da RODADA ATIVA da etapa.
+      // Decisões de rodadas anteriores (ex.: antes de uma correção/reenvio) e
+      // decisões não-aprovadoras (CORRECTION_REQUESTED/FORWARDED) não contam.
+      const round = await activeRound(db, requestId, stepOrder);
       const approved = new Set(
-        request.approvals.filter(a => a.decision === 'APPROVED').map(a => a.approverId)
+        request.approvals
+          .filter(a => a.decision === 'APPROVED' && a.round === round)
+          .map(a => a.approverId)
       ).size;
       if (approved < required) return false;
     }
   }
 
   return true;
+}
+
+// Ponto de integração futuro com o ERP (Sankhya): publica um evento de workflow
+// ao fim de cada ação de aprovação. Hoje é NO-OP por desenho — quando a
+// integração entrar (Passo futuro), aqui se enfileira o evento para o ERP.
+// Mantém o contrato de chamada limpo desde já. Não lança: nunca deve quebrar a
+// transação de negócio que a precede.
+export async function publishWorkflowEvent(
+  _type: string,
+  _requestId: string,
+  _payload?: Record<string, unknown>,
+): Promise<void> {
+  // intencionalmente vazio (no-op) até a integração com o ERP existir.
 }
 
 export async function checkAuthorizationLevel(requestId: string) {

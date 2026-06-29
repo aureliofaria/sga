@@ -3,11 +3,22 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { flowsApi, requestsApi, resourcesApi } from '../services/api';
 import { FlowTypeBadge } from '../components/StatusBadge';
+import DynamicField from '../components/DynamicField';
 import FileUpload from '../components/FileUpload';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import type { FlowTemplate } from '../types';
+
+// Tipos de vaga da trilha de admissão. O branch do fluxo compara contra o valor
+// de 1ª classe `vacancyType` (servidor): só 'NOVA' segue o caminho de definição
+// de compra/estoque; os demais seguem o fluxo padrão.
+const VACANCY_TYPES = [
+  { value: 'NOVA', label: 'Nova vaga', desc: 'Aumento de quadro (headcount novo)' },
+  { value: 'SUBSTITUICAO', label: 'Substituição', desc: 'Reposição de colaborador que saiu' },
+  { value: 'REALOCACAO', label: 'Realocação de setor', desc: 'Movimentação interna' },
+  { value: 'PROMOCAO', label: 'Promoção', desc: 'Mudança de função/nível' },
+];
 
 const flowTypes = [
   { type: 'ONBOARDING', label: 'Admissão de Colaborador', desc: 'Processo de admissão de novo funcionário', icon: '👤', color: 'border-green-200 hover:border-green-400' },
@@ -42,10 +53,23 @@ export default function NewRequest() {
   const [vacancyType, setVacancyType] = useState('');
   const [replacementName, setReplacementName] = useState('');
   const [selectedResourceIds, setSelectedResourceIds] = useState<string[]>([]);
+  // Valores dos campos dinâmicos da etapa 0 (trilha de admissão), por fieldId.
+  const [dynamicValues, setDynamicValues] = useState<Record<string, string>>({});
 
   const { data: flows = [] } = useQuery({ queryKey: ['flows'], queryFn: () => flowsApi.getAll() });
   const filteredFlows = flows.filter((f) => f.type === selectedType && f.isActive);
   const { data: activeResources = [] } = useQuery({ queryKey: ['resources-active'], queryFn: resourcesApi.getActive, enabled: selectedType === 'ONBOARDING' });
+
+  // Carrega o fluxo COMPLETO (com etapas/campos dinâmicos) ao selecionar um modelo.
+  const { data: fullFlow } = useQuery({
+    queryKey: ['flow-full', selectedFlow?.id],
+    queryFn: () => flowsApi.getById(selectedFlow!.id),
+    enabled: !!selectedFlow?.id,
+  });
+  // Campos dinâmicos da etapa de abertura (order 0) — a trilha de admissão os define.
+  const step0 = fullFlow?.steps?.find((s) => s.order === 0);
+  const dynamicFields = (step0?.formFields ?? []).slice().sort((a, b) => a.order - b.order);
+  const hasDynamicFields = dynamicFields.length > 0;
 
   const resourcesBySector = activeResources.reduce<Record<string, typeof activeResources>>((acc, r) => {
     const key = r.sector?.name || 'Geral';
@@ -72,7 +96,7 @@ export default function NewRequest() {
       }
       if (selectedType === 'ONBOARDING') {
         data.vacancyType = vacancyType || undefined;
-        data.replacementName = vacancyType === 'REPLACEMENT' ? replacementName : undefined;
+        data.replacementName = vacancyType === 'SUBSTITUICAO' ? replacementName : undefined;
         data.resourceIds = selectedResourceIds.length > 0 ? selectedResourceIds : undefined;
       }
       if (['PAYMENT', 'PURCHASE'].includes(selectedType)) {
@@ -83,6 +107,15 @@ export default function NewRequest() {
         data.justification = form.justification;
       }
       const req = await requestsApi.create(data);
+      // Grava os valores dos campos dinâmicos da etapa de abertura (order 0).
+      if (hasDynamicFields) {
+        const values = dynamicFields
+          .map((f) => ({ fieldId: f.id, value: (dynamicValues[f.id] ?? '').trim() }))
+          .filter((v) => v.value !== '');
+        if (values.length > 0) {
+          await requestsApi.saveFields(req.id, 0, values);
+        }
+      }
       if (pendingFiles.length > 0) {
         await requestsApi.uploadAttachments(req.id, pendingFiles);
       }
@@ -104,6 +137,10 @@ export default function NewRequest() {
     if (step === 2) return !!selectedFlow;
     if (step === 3) {
       if (!form.title) return false;
+      // Bloqueia avanço se algum campo dinâmico obrigatório estiver vazio.
+      for (const f of dynamicFields) {
+        if (f.required && !(dynamicValues[f.id] ?? '').trim()) return false;
+      }
       return true;
     }
     return true;
@@ -220,19 +257,41 @@ export default function NewRequest() {
               {selectedType === 'ONBOARDING' && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Vaga</label>
-                    <select value={vacancyType} onChange={(e) => setVacancyType(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500">
-                      <option value="">— Selecionar —</option>
-                      <option value="NEW">Nova vaga</option>
-                      <option value="REPLACEMENT">Substituição</option>
-                      <option value="REALLOCATION">Realocação de setor</option>
-                      <option value="PROMOTION">Promoção</option>
-                    </select>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de Vaga</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {VACANCY_TYPES.map((vt) => (
+                        <button
+                          key={vt.value}
+                          type="button"
+                          onClick={() => setVacancyType(vt.value)}
+                          className={`p-3 border-2 rounded-xl text-left transition-all ${vacancyType === vt.value ? 'border-golplus-blue-500 bg-golplus-blue-50' : 'border-gray-200 hover:border-gray-300 bg-white'}`}
+                        >
+                          <div className="font-medium text-sm text-gray-900">{vt.label}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">{vt.desc}</div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  {vacancyType === 'REPLACEMENT' && (
+                  {vacancyType === 'SUBSTITUICAO' && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Nome do colaborador a ser substituído</label>
                       <input type="text" value={replacementName} onChange={(e) => setReplacementName(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Nome completo" />
+                    </div>
+                  )}
+                  {/* Campos dinâmicos da etapa de abertura (trilha de admissão). */}
+                  {hasDynamicFields && (
+                    <div className="border-t border-gray-100 pt-4">
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Dados da Abertura de Vaga</h3>
+                      <div className="space-y-4">
+                        {dynamicFields.map((f) => (
+                          <DynamicField
+                            key={f.id}
+                            field={f}
+                            value={dynamicValues[f.id] ?? ''}
+                            onChange={(v) => setDynamicValues((prev) => ({ ...prev, [f.id]: v }))}
+                          />
+                        ))}
+                      </div>
                     </div>
                   )}
                   {vacancyType && activeResources.length > 0 && (

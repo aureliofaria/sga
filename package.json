@@ -4,6 +4,7 @@
   "private": true,
   "workspaces": ["backend", "frontend"],
   "scripts": {
+    "start": "node launch.mjs",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
     "setup": "npm install && npm run db:migrate --workspace=backend && npm run db:generate --workspace=backend && npm run db:seed --workspace=backend"

@@ -101,7 +101,11 @@ export default function Requests() {
                   </td>
                   <td className="px-5 py-3"><FlowTypeBadge type={req.flow?.type} /></td>
                   <td className="px-5 py-3 text-sm text-gray-600">{req.initiator?.name}</td>
-                  <td className="px-5 py-3"><StatusBadge status={req.status} /></td>
+                  <td className="px-5 py-3">
+                    {req.statusLabel
+                      ? <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-golplus-blue-100 text-golplus-blue-800" title={req.status}>{req.statusLabel}</span>
+                      : <StatusBadge status={req.status} />}
+                  </td>
                   <td className="px-5 py-3 text-sm text-gray-600">{formatCurrency(req.amountCents)}</td>
                   <td className="px-5 py-3 text-sm text-gray-500">
                     {format(new Date(req.createdAt), 'dd/MM/yyyy', { locale: ptBR })}
