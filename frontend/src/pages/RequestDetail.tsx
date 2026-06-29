@@ -632,19 +632,36 @@ export default function RequestDetail() {
       <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
         <h3 className="text-sm font-semibold text-gray-700 mb-4">Progresso do Fluxo</h3>
         <div className="flex items-center gap-2 overflow-x-auto pb-2">
-          {request.flow?.steps?.map((step, idx) => (
-            <div key={step.id} className="flex items-center gap-2 flex-shrink-0">
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
-                idx < request.currentStep ? 'bg-green-100 text-green-800' :
-                idx === request.currentStep ? 'bg-golplus-blue-100 text-golplus-blue-800 font-medium' :
-                'bg-gray-100 text-gray-500'
-              }`}>
-                <span>{idx < request.currentStep ? '✓' : idx === request.currentStep ? '→' : `${idx + 1}`}</span>
-                <span>{step.name}</span>
-              </div>
-              {idx < (request.flow?.steps?.length || 0) - 1 && <span className="text-gray-300">→</span>}
-            </div>
-          ))}
+          {(() => {
+            // Etapas EFETIVAMENTE percorridas (têm tarefa criada) ou com aprovação
+            // registrada — usado para distinguir "concluída" de "pulada" (branch).
+            const visited = new Set<number>();
+            (request.tasks ?? []).forEach((t) => { if (t.step?.order != null) visited.add(t.step.order); });
+            (request.approvals ?? []).forEach((a) => { if (a.stepOrder != null) visited.add(a.stepOrder); });
+            const steps = request.flow?.steps ?? [];
+            return steps.map((step, idx) => {
+              // Comparar por ORDER (não pelo índice): os orders são espaçados (0/10/.../80).
+              const isCurrent = step.order === request.currentStep;
+              const isPast = step.order < request.currentStep;
+              const isDone = isPast && visited.has(step.order);
+              const isSkipped = isPast && !visited.has(step.order);
+              const cls = isDone ? 'bg-green-100 text-green-800'
+                : isCurrent ? 'bg-golplus-blue-100 text-golplus-blue-800 font-medium'
+                : isSkipped ? 'bg-gray-50 text-gray-400 border border-dashed border-gray-300'
+                : 'bg-gray-100 text-gray-500';
+              const icon = isDone ? '✓' : isCurrent ? '→' : isSkipped ? '⤼' : `${idx + 1}`;
+              return (
+                <div key={step.id} className="flex items-center gap-2 flex-shrink-0">
+                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${cls}`}>
+                    <span>{icon}</span>
+                    <span>{step.name}</span>
+                    {isSkipped && <span className="text-[10px] uppercase tracking-wide">(pulada)</span>}
+                  </div>
+                  {idx < steps.length - 1 && <span className="text-gray-300">→</span>}
+                </div>
+              );
+            });
+          })()}
         </div>
       </div>
 
@@ -675,7 +692,12 @@ export default function RequestDetail() {
                 <dl className="space-y-2">
                   <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Fluxo:</dt><dd className="text-sm text-gray-900">{request.flow?.name}</dd></div>
                   <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Solicitante:</dt><dd className="text-sm text-gray-900">{request.initiator?.name}</dd></div>
-                  <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Etapa atual:</dt><dd className="text-sm text-gray-900">{request.currentStep + 1} de {request.flow?.steps?.length}</dd></div>
+                  <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Etapa atual:</dt><dd className="text-sm text-gray-900">{(() => {
+                    const steps = request.flow?.steps ?? [];
+                    const pos = steps.findIndex((s) => s.order === request.currentStep);
+                    const nome = currentStep?.name ? `${currentStep.name} — ` : '';
+                    return pos >= 0 ? `${nome}passo ${pos + 1} de ${steps.length}` : (request.statusLabel || request.status);
+                  })()}</dd></div>
                   {request.description && <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Descrição:</dt><dd className="text-sm text-gray-900">{request.description}</dd></div>}
                 </dl>
               </div>
