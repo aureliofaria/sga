@@ -3,7 +3,10 @@ import path from 'path';
 import fs from 'fs';
 import { Request, Response, NextFunction } from 'express';
 
-const uploadDir = path.join(__dirname, '../../uploads');
+// Diretório de anexos. Configurável por UPLOAD_DIR para deploys com volume
+// persistente (ex.: Railway/Fly montam um volume e apontam UPLOAD_DIR para ele).
+// Padrão: backend/uploads (relativo ao dist em runtime).
+const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 // Whitelist de tipos aceitos para anexos. Evita upload de HTML/SVG (XSS armazenado,

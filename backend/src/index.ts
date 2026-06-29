@@ -31,7 +31,7 @@ app.use(express.json({ limit: '1mb' }));
 // mitigando XSS armazenado caso um arquivo de tipo perigoso seja servido.
 app.use(
   '/uploads',
-  express.static(path.join(__dirname, '../uploads'), {
+  express.static(process.env.UPLOAD_DIR || path.join(__dirname, '../uploads'), {
     setHeaders: (res) => {
       res.setHeader('Content-Disposition', 'attachment');
       res.setHeader('X-Content-Type-Options', 'nosniff');
