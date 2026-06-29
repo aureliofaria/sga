@@ -62,6 +62,22 @@ describe('filas de função — resolução por hierarquia (Passo 6)', () => {
     expect((await resolveQueueEligibles(prisma, { requiredRole: 'SISTEMAS' }, initiator.id)).map(e => e.id)).toEqual([sis.id]);
   });
 
+  // U2d — PRECISÃO POR FUNÇÃO PRIORITÁRIA SOBRE O NÍVEL: o especialista da função
+  // num nível ACIMA de membros genéricos deve receber a fila (não os genéricos).
+  // (Regressão do bloqueador: preferência de função não podia ficar presa ao nível.)
+  it('U2d: especialista de função em LIDER_2 + genéricos em MEMBRO → fila só o especialista', async () => {
+    const initiator = await makeUser('USER', 'init');
+    const tiLider = await makeUser('TI', 'ti-lider2');
+    const gen1 = await makeUser('USER', 'gen-membro-1');
+    const gen2 = await makeUser('USER', 'gen-membro-2');
+    await addMember('TI, Dados e Infra', tiLider.id, 'LIDER_2');
+    await addMember('TI, Dados e Infra', gen1.id, 'MEMBRO');
+    await addMember('TI, Dados e Infra', gen2.id, 'MEMBRO');
+
+    const ids = (await resolveQueueEligibles(prisma, { requiredRole: 'TI' }, initiator.id)).map(e => e.id);
+    expect(ids).toEqual([tiLider.id]); // só quem exerce TI, mesmo estando acima dos genéricos
+  });
+
   // U2c — fallback preservado: se NINGUÉM no setor exerce a função (papéis genéricos),
   // a fila recai sobre todos os membros do nível (comportamento original do Passo 6).
   it('U2c: sem ninguém exercendo a função → fallback para todos os membros do setor', async () => {

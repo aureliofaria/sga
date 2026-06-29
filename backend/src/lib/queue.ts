@@ -51,7 +51,11 @@ export async function resolveQueueEligibles(
   // DIRETORIA: qualquer membro do setor 'Diretoria' (qualquer nível); se o
   // setor não existir, recorre aos usuários com papel global 'DIRETORIA'.
   if (functionRole === 'DIRETORIA') {
-    const directorate = await collectFromSectors(db, ['Diretoria'], initiatorId, { anyLevel: true, preferRole: 'DIRETORIA' });
+    // Precisão por função primeiro: membros do setor Diretoria que EXERCEM o papel.
+    const exactDir = await collectFromSectors(db, ['Diretoria'], initiatorId, { anyLevel: true, requireRole: 'DIRETORIA' });
+    if (exactDir.length > 0) return exactDir;
+    // Senão, qualquer membro do setor Diretoria (qualquer nível).
+    const directorate = await collectFromSectors(db, ['Diretoria'], initiatorId, { anyLevel: true });
     if (directorate.length > 0) return directorate;
     const byRole = await db.user.findMany({
       where: { role: 'DIRETORIA', isActive: true, id: { not: initiatorId } },
@@ -64,14 +68,20 @@ export async function resolveQueueEligibles(
   const sectorNames = sectorsForFunction(functionRole);
   if (sectorNames.length === 0) return fallbackToInitiator();
 
-  // Fallback hierárquico por nível, acumulando sobre TODOS os setores da função.
-  // `preferRole` torna a fila PRECISA POR FUNÇÃO: quando um setor hospeda várias
-  // funções (ex.: TI/DADOS/SISTEMAS compartilham 'TI, Dados e Infra'), a fila da
-  // função X vai a quem de fato exerce X (user.role === X). Se ninguém no nível
-  // exerce a função, recai sobre TODOS daquele nível (comportamento do Passo 6,
-  // ex.: setor com função 1:1 cujos membros têm papel genérico).
+  // (1) PRECISÃO POR FUNÇÃO, PRIORITÁRIA SOBRE O NÍVEL. Quando um setor hospeda
+  // várias funções (ex.: TI/DADOS/SISTEMAS em 'TI, Dados e Infra'), a fila da
+  // função X deve ir a quem EXERCE X (user.role === X) — mesmo que o especialista
+  // esteja num nível acima de membros genéricos. Por isso buscamos quem exerce a
+  // função PRIMEIRO, varrendo os níveis (MEMBRO→LIDER_2→LIDER_1) entre ELES.
   for (const level of ['MEMBRO', 'LIDER_2', 'LIDER_1'] as const) {
-    const found = await collectFromSectors(db, sectorNames, initiatorId, { level, preferRole: functionRole });
+    const exact = await collectFromSectors(db, sectorNames, initiatorId, { level, requireRole: functionRole });
+    if (exact.length > 0) return exact;
+  }
+
+  // (2) Fallback do Passo 6: NINGUÉM exerce a função em nível algum (ex.: setor
+  // com função 1:1 cujos membros têm papel genérico) → todos do nível mais baixo.
+  for (const level of ['MEMBRO', 'LIDER_2', 'LIDER_1'] as const) {
+    const found = await collectFromSectors(db, sectorNames, initiatorId, { level });
     if (found.length > 0) return found;
   }
 
@@ -85,7 +95,7 @@ async function collectFromSectors(
   db: Db,
   sectorNames: string[],
   initiatorId: string,
-  opts: { level?: string; anyLevel?: boolean; preferRole?: string },
+  opts: { level?: string; anyLevel?: boolean; requireRole?: string },
 ): Promise<{ id: string; name: string }[]> {
   const sectors = await db.sector.findMany({ where: { name: { in: sectorNames } }, select: { id: true } });
   const sectorIds = sectors.map(s => s.id);
@@ -96,21 +106,16 @@ async function collectFromSectors(
       sectorId: { in: sectorIds },
       ...(opts.anyLevel ? {} : { level: opts.level }),
       userId: { not: initiatorId },
-      user: { is: { isActive: true } },
+      user: { is: { isActive: true, ...(opts.requireRole ? { role: opts.requireRole } : {}) } },
     },
-    select: { userId: true, user: { select: { id: true, name: true, role: true } } },
+    select: { userId: true, user: { select: { id: true, name: true } } },
   });
 
-  // Precisão por função: se algum membro EXERCE a função (user.role === preferRole),
-  // restringe a fila a esses; senão, mantém todos (fallback do Passo 6).
-  const all = members.filter((m) => m.user);
-  const pool = opts.preferRole
-    ? (all.some((m) => m.user!.role === opts.preferRole) ? all.filter((m) => m.user!.role === opts.preferRole) : all)
-    : all;
-
+  // `requireRole` é filtro ESTRITO (no WHERE): retorna SÓ quem exerce a função.
+  // Vazio quando ninguém do conjunto a exerce — o chamador decide o fallback.
   const byId = new Map<string, { id: string; name: string }>();
-  for (const m of pool) {
-    byId.set(m.user!.id, { id: m.user!.id, name: m.user!.name });
+  for (const m of members) {
+    if (m.user) byId.set(m.user.id, { id: m.user.id, name: m.user.name });
   }
   return [...byId.values()];
 }
