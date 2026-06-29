@@ -192,6 +192,48 @@ export interface AssetMovement {
   createdAt: string;
 }
 
+// Tipo de campo dinâmico (FormField) — Fase 1 (trilha de onboarding).
+export type FieldType = 'TEXT' | 'TEXTAREA' | 'NUMBER' | 'DATE' | 'SELECT' | 'EMAIL' | 'CPF' | 'RG' | 'MONEY' | 'PHONE';
+
+// Definição de um campo dinâmico de uma etapa (vem de GET /flows/:id).
+export interface FormField {
+  id: string;
+  flowStepId: string;
+  key: string;
+  label: string;
+  type: FieldType;
+  required: boolean;
+  options?: string | null; // JSON array (string) p/ SELECT
+  order: number;
+  sensitiveType?: string | null;
+  createdAt?: string;
+}
+
+// Item de checklist de uma etapa. No GET /requests/:id vem anotado pelo servidor
+// com `applicable` (a condição se aplica a esta solicitação) e `checked` (estado).
+export interface ChecklistItem {
+  id: string;
+  flowStepId: string;
+  label: string;
+  order: number;
+  required: boolean;
+  condition?: string | null;
+  applicable?: boolean;
+  checked?: boolean;
+  createdAt?: string;
+}
+
+// Valor dinâmico já mascarado para o espectador (GET /requests/:id).
+export interface RequestFieldValue {
+  id: string;
+  requestId: string;
+  fieldId: string;
+  value: string; // JÁ MASCARADO pelo servidor quando sensível
+  field: Pick<FormField, 'key' | 'label' | 'type' | 'sensitiveType' | 'order' | 'options'>;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface FlowStep {
   id: string;
   flowTemplateId: string;
@@ -205,10 +247,13 @@ export interface FlowStep {
   handlingSectorId?: string;
   handlingSector?: { id: string; name: string };
   authLevels: AuthorizationLevel[];
+  formFields?: FormField[];
+  checklistItems?: ChecklistItem[];
   conditions?: string;
   activateOnSectorId?: string;
   activateOnSector?: { id: string; name: string };
   collectsResources?: boolean;
+  statusLabel?: string | null;
   createdAt: string;
 }
 
@@ -271,7 +316,7 @@ export interface RequestTask {
   assignee: Pick<User, 'id' | 'name' | 'email'>;
   title: string;
   description?: string;
-  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'REJECTED';
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'REJECTED' | 'CANCELLED';
   dueDate?: string;
   completedAt?: string;
   notes?: string;
@@ -292,11 +337,24 @@ export type RequestStatus =
   | 'PENDING'
   | 'IN_PROGRESS'
   | 'AWAITING_APPROVAL'
+  | 'AWAITING_CORRECTION'
+  | 'AWAITING_INFO'
   | 'APPROVED'
   | 'REJECTED'
   | 'RETURNED'
   | 'COMPLETED'
   | 'CANCELLED';
+
+// Ações de decisão rica do aprovador (POST /requests/:id/decision).
+export type DecisionAction = 'DEFER' | 'REJECT' | 'REQUEST_CORRECTION' | 'REQUEST_INFO' | 'FORWARD';
+
+// Filho de subfluxo (ex.: compra vinculada) — vem de GET /requests/:id.
+export interface RequestChild {
+  id: string;
+  title: string;
+  status: RequestStatus;
+  flow?: { type: string };
+}
 
 export interface Request {
   id: string;
@@ -307,7 +365,14 @@ export interface Request {
   title: string;
   description?: string;
   status: RequestStatus;
+  // Rótulo humano da etapa corrente (Fase 0/1). Quando ausente, cair no status de máquina.
+  statusLabel?: string | null;
   currentStep: number;
+  // Subfluxo (Fase 0 · Passo 9)
+  parentRequestId?: string | null;
+  children?: RequestChild[];
+  // Valores dinâmicos JÁ MASCARADOS para o espectador (GET /requests/:id)
+  fieldValues?: RequestFieldValue[];
   // HR
   targetEmployee?: string;
   targetDepartment?: string;

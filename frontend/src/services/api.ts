@@ -109,6 +109,19 @@ export const requestsApi = {
     api.post(`/requests/${id}/approve`, { comments }).then((r) => r.data),
   reject: (id: string, comments?: string) =>
     api.post(`/requests/${id}/reject`, { comments }).then((r) => r.data),
+  // Decisão rica do aprovador (Fase 1): DEFER | REJECT | REQUEST_CORRECTION | REQUEST_INFO | FORWARD.
+  decision: (
+    id: string,
+    payload: { action: string; reason?: string; forwardToUserId?: string; forwardToRole?: string },
+  ) => api.post(`/requests/${id}/decision`, payload).then((r) => r.data),
+  // Reenvio pelo iniciador quando a solicitação está AWAITING_CORRECTION.
+  resubmit: (id: string) => api.post(`/requests/${id}/resubmit`).then((r) => r.data),
+  // Grava valores de campos dinâmicos de uma etapa (resposta não ecoa valores).
+  saveFields: (id: string, stepOrder: number, values: { fieldId: string; value: string }[]) =>
+    api.post<{ ok: boolean; count: number; savedFieldIds: string[] }>(`/requests/${id}/fields`, { stepOrder, values }).then((r) => r.data),
+  // Marca/desmarca um item de checklist (somente assignee da etapa/ADMIN).
+  toggleChecklist: (id: string, itemId: string, checked: boolean) =>
+    api.post<{ ok: boolean; checked: boolean; itemId: string }>(`/requests/${id}/checklist/${itemId}`, { checked }).then((r) => r.data),
   uploadAttachments: (id: string, files: File[]) => {
     const formData = new FormData();
     files.forEach((f) => formData.append('files', f));
@@ -136,6 +149,11 @@ export const tasksApi = {
     api.post<RequestTask>(`/tasks/${id}/complete`, { notes }).then((r) => r.data),
   reject: (id: string, notes?: string) =>
     api.post<RequestTask>(`/tasks/${id}/reject`, { notes }).then((r) => r.data),
+  // Assumir uma tarefa de fila (dono único). Cancela as irmãs PENDING da etapa.
+  claim: (id: string) => api.post<RequestTask>(`/tasks/${id}/claim`).then((r) => r.data),
+  // Justificar atraso de uma tarefa (SLA).
+  justifyDelay: (id: string, justification: string) =>
+    api.post<RequestTask>(`/tasks/${id}/justify-delay`, { justification }).then((r) => r.data),
   batchComplete: (taskIds: string[], notes?: string) =>
     api.post<{ completed: number; tasks: RequestTask[] }>('/tasks/batch-complete', { taskIds, notes }).then((r) => r.data),
   uploadAttachment: (id: string, files: File[]) => {

@@ -119,10 +119,12 @@ export default function MyTasks() {
     onError: () => toast.error('Erro ao rejeitar tarefa'),
   });
 
-  const startMutation = useMutation({
-    mutationFn: (id: string) => tasksApi.update(id, { status: 'IN_PROGRESS' }),
-    onSuccess: () => { toast.success('Tarefa iniciada'); qc.invalidateQueries({ queryKey: ['myTasks'] }); },
-    onError: () => toast.error('Erro ao iniciar tarefa'),
+  // Assumir tarefa de fila (claim): cancela as irmãs PENDING e torna o usuário
+  // o único responsável. Substitui o "iniciar" em filas de dono único.
+  const claimMutation = useMutation({
+    mutationFn: (id: string) => tasksApi.claim(id),
+    onSuccess: () => { toast.success('Tarefa assumida'); qc.invalidateQueries({ queryKey: ['myTasks'] }); },
+    onError: (e: any) => toast.error(e?.response?.data?.error || 'Não foi possível assumir a tarefa'),
   });
 
   const filtered = useMemo(
@@ -239,6 +241,9 @@ export default function MyTasks() {
                     <StatusBadge status={task.status} />
                     <SlaBadge task={task} />
                   </div>
+                  {task.step?.name && (
+                    <p className="text-xs text-gray-500 mt-0.5">Etapa: {task.step.name}</p>
+                  )}
                   <Link to={`/requests/${task.requestId}`} className="text-xs text-golplus-blue-600 hover:text-golplus-blue-800 mt-1 inline-block">
                     {task.request?.title}
                   </Link>
@@ -247,8 +252,8 @@ export default function MyTasks() {
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
                   {task.status === 'PENDING' && (
-                    <button onClick={() => startMutation.mutate(task.id)} className="px-3 py-1.5 bg-golplus-blue text-white rounded-lg text-xs font-medium hover:bg-golplus-blue-800">
-                      Iniciar
+                    <button onClick={() => claimMutation.mutate(task.id)} disabled={claimMutation.isPending} className="px-3 py-1.5 bg-golplus-blue text-white rounded-lg text-xs font-medium hover:bg-golplus-blue-800 disabled:opacity-50">
+                      Assumir
                     </button>
                   )}
                   {isActive && (
