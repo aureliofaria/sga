@@ -205,12 +205,21 @@ describe('pagamentos — IDOR', () => {
     expect((await request(app).get(`/api/requests/${created.body.id}`).set(auth(tokenFor(initiator.id)))).status).toBe(200);
   });
 
-  it('FINANCE (papel de visão ampla) lê qualquer pagamento (200)', async () => {
+  it('FINANCE só lê o pagamento quando envolvido por tarefa/escopo (modelo Fase 0)', async () => {
+    // Fase 0: visão global é só de ADMIN/DIRETORIA. FINANCE enxerga o pagamento
+    // quando a tarefa é roteada a ele (etapa de Processamento Financeiro) ou está
+    // no seu escopo de setor — não há mais visão ampla por papel.
     const initiator = await makeUser('USER');
     const fin = await makeUser('FINANCE');
     const flow = await makePaymentFlow();
     const created = await request(app).post('/api/requests').set(auth(tokenFor(initiator.id))).send(validPayment(flow.id));
-    expect((await request(app).get(`/api/requests/${created.body.id}`).set(auth(tokenFor(fin.id)))).status).toBe(200);
+    const reqId = created.body.id;
+    // Sem envolvimento: 403 (sem visão ampla por papel).
+    expect((await request(app).get(`/api/requests/${reqId}`).set(auth(tokenFor(fin.id)))).status).toBe(403);
+    // Roteia a tarefa de Processamento Financeiro (etapa 2) ao FINANCE → passa a ver.
+    const step2 = await prisma.flowStep.findFirst({ where: { flowTemplateId: flow.id, order: 2 } });
+    await prisma.requestTask.create({ data: { requestId: reqId, stepId: step2!.id, assigneeId: fin.id, title: 'Financeiro' } });
+    expect((await request(app).get(`/api/requests/${reqId}`).set(auth(tokenFor(fin.id)))).status).toBe(200);
   });
 
   it('USER não envolvido não anexa em pagamento alheio (403)', async () => {
@@ -242,14 +251,20 @@ describe('pagamentos — visibilidade por papel (escopo de listagem)', () => {
     expect(listA.body.some((r: any) => r.title === 'de-B')).toBe(false);
   });
 
-  it('papel de visão ampla (FINANCE) lista pedidos de todos', async () => {
+  it('FINANCE lista pagamentos pelo escopo: vê quando tem tarefa roteada (modelo Fase 0)', async () => {
     const a = await makeUser('USER');
     const fin = await makeUser('FINANCE');
     const flow = await makePaymentFlow();
-    await request(app).post('/api/requests').set(auth(tokenFor(a.id))).send(validPayment(flow.id, { title: 'de-A' }));
-    const list = await request(app).get('/api/requests').set(auth(tokenFor(fin.id)));
-    expect(list.status).toBe(200);
-    expect(list.body.some((r: any) => r.title === 'de-A')).toBe(true);
+    const created = await request(app).post('/api/requests').set(auth(tokenFor(a.id))).send(validPayment(flow.id, { title: 'de-A' }));
+    // Sem envolvimento: o pedido de A NÃO aparece para o FINANCE (sem visão ampla).
+    const before = await request(app).get('/api/requests').set(auth(tokenFor(fin.id)));
+    expect(before.status).toBe(200);
+    expect(before.body.some((r: any) => r.title === 'de-A')).toBe(false);
+    // Com a tarefa de Processamento Financeiro roteada ao FINANCE → passa a listar.
+    const step2 = await prisma.flowStep.findFirst({ where: { flowTemplateId: flow.id, order: 2 } });
+    await prisma.requestTask.create({ data: { requestId: created.body.id, stepId: step2!.id, assigneeId: fin.id, title: 'Financeiro' } });
+    const after = await request(app).get('/api/requests').set(auth(tokenFor(fin.id)));
+    expect(after.body.some((r: any) => r.title === 'de-A')).toBe(true);
   });
 });
 

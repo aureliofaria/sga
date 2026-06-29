@@ -69,11 +69,11 @@ async function main() {
   // 5) Segregação de funções: iniciador não aprova a própria solicitação
   check('iniciador NÃO aprova a própria (403)', (await api('POST', `/api/requests/${reqId}/approve`, joao, {})).status === 403);
 
-  // 5b) IDOR: o iniciador lê o próprio pedido; FINANCE (visão ampla) também.
-  // (O caso negativo — USER alheio sem envolvimento recebe 403 — é validado no
-  //  vitest payments.test.ts, pois o seed tem apenas um USER.)
+  // 5b) Visibilidade (modelo Fase 0): o iniciador lê o próprio pedido. FINANCE
+  // NÃO tem mais visão ampla por papel — sem envolvimento (tarefa/escopo) recebe
+  // 403; só ADMIN/DIRETORIA têm visão global. (Detalhes no vitest payments.test.ts.)
   check('iniciador lê o próprio pedido (200)', (await api('GET', `/api/requests/${reqId}`, joao)).status === 200);
-  check('FINANCE (visão ampla) lê pedido (200)', (await api('GET', `/api/requests/${reqId}`, fin)).status === 200);
+  check('FINANCE sem envolvimento NÃO lê pedido alheio (403)', (await api('GET', `/api/requests/${reqId}`, fin)).status === 403);
 
   // 6) Rejeição exige motivo
   check('rejeição sem motivo é barrada (400)', (await api('POST', `/api/requests/${reqId}/reject`, gestor, {})).status === 400);
