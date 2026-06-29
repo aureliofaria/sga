@@ -35,28 +35,19 @@ export default function Logo({ variant = 'color', className = '', showApprova = 
     );
   }
 
-  // Fallback wordmark
+  // Fallback wordmark (provisório, até o PNG oficial estar em /public).
+  // Sem símbolos: apenas o wordmark proporcional nas cores da marca.
   const golColor = isWhite ? 'text-white' : 'text-golplus-blue';
-  const plusColor = isWhite ? 'text-white' : 'text-golplus-blue';
+  const plusColor = isWhite ? 'text-white' : 'text-golplus-orange';
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      <div className="flex items-center font-extrabold text-2xl lowercase select-none">
+      <div className="flex items-baseline font-extrabold text-2xl lowercase tracking-tight leading-none select-none">
         <span className={golColor}>gol</span>
-        {/* location pin combinado com "+" */}
-        <span className="mx-0.5 inline-flex items-center justify-center" aria-hidden="true">
-          <svg width="22" height="26" viewBox="0 0 22 26" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M11 1C5.477 1 1 5.477 1 11c0 6.5 10 14 10 14s10-7.5 10-14C21 5.477 16.523 1 11 1z"
-              fill="#F47C20"
-            />
-            <path d="M11 6v8M7 10h8" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
-          </svg>
-        </span>
-        <span className={plusColor}>plus</span>
+        <span className={`ml-1 ${plusColor}`}>plus</span>
       </div>
       {showApprova && (
-        <span className={`font-bold tracking-wide text-xs mt-1 ${isWhite ? 'text-white/90' : 'text-golplus-orange'}`}>
+        <span className={`font-bold tracking-wide text-xs ${isWhite ? 'text-white/90' : 'text-golplus-orange'}`}>
           APROVA
         </span>
       )}
