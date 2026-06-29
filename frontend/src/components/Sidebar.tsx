@@ -28,7 +28,7 @@ export default function Sidebar() {
   });
 
   return (
-    <div className="flex flex-col w-60 min-h-screen bg-gradient-to-b from-golplus-blue to-golplus-blue-800">
+    <div className="flex flex-col w-60 min-h-screen bg-golplus-blue">
       {/* Brand */}
       <div className="px-5 py-5 border-b border-white/10">
         <Logo variant="white" />
