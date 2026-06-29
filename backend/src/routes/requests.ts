@@ -207,71 +207,78 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
       resolvedParentId = parentRecord.id as string;
     }
 
-    const request = await prisma.request.create({
-      data: {
-        flowId,
-        initiatorId: req.user.id,
-        title,
-        description,
-        status: 'IN_PROGRESS',
-        currentStep: 0,
-        targetEmployee,
-        targetDepartment,
-        startDate,
-        amountCents: amount.value,
-        supplier,
-        costCenter,
-        justification,
-        vacancyType: vacancyType || null,
-        replacementName: replacementName || null,
-        parentRequestId: resolvedParentId,
-      },
-    });
-
-    // Save selected resources
-    if (Array.isArray(resourceIds) && resourceIds.length > 0) {
-      for (const rid of resourceIds as string[]) {
-        await prisma.requestResource.upsert({
-          where: { requestId_resourceItemId: { requestId: request.id, resourceItemId: rid } },
-          update: {},
-          create: { requestId: request.id, resourceItemId: rid },
-        });
-      }
-    }
-
-    await prisma.auditLog.create({
-      data: {
-        requestId: request.id,
-        userId: req.user.id,
-        userName: req.user.name,
-        action: 'CREATED',
-        details: `Solicitação criada: ${title}`,
-      },
-    });
-
-    // Protocolo de retorno automático no pai (Fase 0 · Passo 9):
-    // registra AuditLog + Comment no pai indicando abertura do subfluxo.
-    if (resolvedParentId && parentRecord) {
-      await prisma.auditLog.create({
+    // Criação atômica: a solicitação, os recursos, a auditoria, o protocolo do
+    // subfluxo no pai e as tarefas iniciais vivem na MESMA transação — evita
+    // "solicitação fantasma" (criada mas sem tarefas/protocolo) se algo falhar
+    // no meio. createRequestTasks aceita o cliente de transação.
+    const request = await prisma.$transaction(async (tx) => {
+      const created = await tx.request.create({
         data: {
-          requestId: resolvedParentId,
+          flowId,
+          initiatorId: req.user.id,
+          title,
+          description,
+          status: 'IN_PROGRESS',
+          currentStep: 0,
+          targetEmployee,
+          targetDepartment,
+          startDate,
+          amountCents: amount.value,
+          supplier,
+          costCenter,
+          justification,
+          vacancyType: vacancyType || null,
+          replacementName: replacementName || null,
+          parentRequestId: resolvedParentId,
+        },
+      });
+
+      // Save selected resources
+      if (Array.isArray(resourceIds) && resourceIds.length > 0) {
+        for (const rid of resourceIds as string[]) {
+          await tx.requestResource.upsert({
+            where: { requestId_resourceItemId: { requestId: created.id, resourceItemId: rid } },
+            update: {},
+            create: { requestId: created.id, resourceItemId: rid },
+          });
+        }
+      }
+
+      await tx.auditLog.create({
+        data: {
+          requestId: created.id,
           userId: req.user.id,
           userName: req.user.name,
-          action: 'SUBFLOW_OPENED',
-          details: JSON.stringify({ childId: request.id, childTitle: title, childType: flow.type }),
+          action: 'CREATED',
+          details: `Solicitação criada: ${title}`,
         },
       });
-      await prisma.comment.create({
-        data: {
-          requestId: resolvedParentId,
-          stepOrder: parentRecord.currentStep as number,
-          authorId: req.user.id,
-          body: `Subfluxo aberto: "${title}" (protocolo ${request.id})`,
-        },
-      });
-    }
 
-    await createRequestTasks(request.id, flowId, 0);
+      // Protocolo de retorno automático no pai (Fase 0 · Passo 9):
+      // registra AuditLog + Comment no pai indicando abertura do subfluxo.
+      if (resolvedParentId && parentRecord) {
+        await tx.auditLog.create({
+          data: {
+            requestId: resolvedParentId,
+            userId: req.user.id,
+            userName: req.user.name,
+            action: 'SUBFLOW_OPENED',
+            details: JSON.stringify({ childId: created.id, childTitle: title, childType: flow.type }),
+          },
+        });
+        await tx.comment.create({
+          data: {
+            requestId: resolvedParentId,
+            stepOrder: parentRecord.currentStep as number,
+            authorId: req.user.id,
+            body: `Subfluxo aberto: "${title}" (protocolo ${created.id})`,
+          },
+        });
+      }
+
+      await createRequestTasks(created.id, flowId, 0, tx);
+      return created;
+    });
 
     const full = await prisma.request.findUnique({
       where: { id: request.id },
