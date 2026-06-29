@@ -1,0 +1,51 @@
+# Deploy de TESTE no Railway (homologação clicável)
+
+Ambiente de **teste/homologação** do APROVA no Railway, rodando o app **como em
+produção** (processo único: backend Express serve o frontend + SQLite), porém com
+**dados de demonstração** já semeados para clicar e validar os fluxos.
+
+> ⚠️ Isto é um ambiente de TESTE: usa usuários demo (senha `senha123`). Para o
+> go-live REAL, use o servidor interno seguindo `DEPLOY.md` (com
+> `NODE_ENV=production`, `ADMIN_EMAIL`/`ADMIN_PASSWORD` e **sem** dados demo).
+
+## Como funciona
+- `Dockerfile` constrói tudo (frontend + backend + Prisma) e `railway-entrypoint.sh`
+  aplica as migrations e, **na primeira subida (banco vazio)**, semeia os dados de
+  demonstração. Em reinícios, não re-semeia.
+- **Persistência** fica num **Volume** montado em `/data`: o SQLite e os anexos
+  vivem lá (`DATABASE_URL=file:/data/aprova.db`, `UPLOAD_DIR=/data/uploads`), então
+  os dados sobrevivem a reinícios/redeploys.
+
+## Passo a passo (~10 min)
+
+1. **railway.app → New Project → Deploy from GitHub repo** → selecione
+   `aureliofaria/APROVA`, branch **`main`**. O Railway detecta o `Dockerfile`.
+
+2. **Adicione um Volume** ao serviço (aba *Volumes* / *Data*): mount path **`/data`**.
+
+3. **Variáveis** (aba *Variables*):
+   ```
+   JWT_SECRET   = <gere: openssl rand -hex 32>
+   DATABASE_URL = file:/data/aprova.db
+   UPLOAD_DIR   = /data/uploads
+   SERVE_FRONTEND = true
+   ```
+   > Não defina `NODE_ENV=production` neste ambiente de teste — é o que permite o
+   > seed de demonstração. (O `JWT_SECRET` acima já garante tokens seguros.)
+   > Não defina `PORT`: o Railway injeta a porta automaticamente.
+
+4. **Deploy**. Acompanhe os logs: devem mostrar "Aplicando migrations", "semeando
+   dados de DEMONSTRAÇÃO" e "Iniciando servidor".
+
+5. **Gere o domínio público**: *Settings → Networking → Generate Domain*.
+
+6. Acesse a URL e entre com **`admin@aprova.com` / `senha123`** (ou rh/financeiro/
+   gestor/joao @aprova.com). A trilha de onboarding, pagamentos e o roteamento já
+   estão prontos para teste; o setor Financeiro tem Líder I (Carlos) para receber
+   pagamentos.
+
+## Limitações deste ambiente de teste
+- É monoinstância (1 réplica) — adequado para homologação, não para carga.
+- Os agendadores (escalonamento/recorrências) rodam no processo; para forçar a
+  geração de recorrências use o botão **"Gerar vencidas agora"**.
+- Notificações: só **in-app** (Teams/Outlook desligado).
