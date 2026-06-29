@@ -34,6 +34,10 @@ export async function resetDb() {
   await prisma.flowStep.deleteMany();
   await prisma.flowTemplate.deleteMany();
   await prisma.resourceItem.deleteMany();
+  // Parâmetros financeiros (Fase 0 · Passo 12): saem ANTES de sector/sectorMember
+  // (FinanceParam.sectorId → Sector com onDelete: Cascade; auditoria é independente).
+  await prisma.financeParamAuditLog.deleteMany();
+  await prisma.financeParam.deleteMany();
   await prisma.sectorMember.deleteMany();
   await prisma.request.deleteMany();
   await prisma.user.deleteMany();

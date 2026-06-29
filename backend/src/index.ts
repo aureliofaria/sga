@@ -16,6 +16,7 @@ import inventoryRouter from './routes/inventory';
 import reportsRouter from './routes/reports';
 import auditLogsRouter from './routes/audit-logs';
 import notificationsRouter from './routes/notifications';
+import financeParamsRouter from './routes/financeParams';
 import { processEscalations } from './services/workflow';
 
 const app = express();
@@ -58,6 +59,7 @@ app.use('/api/inventory', inventoryRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/audit-logs', auditLogsRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/finance-params', financeParamsRouter);
 
 // Deploy de processo único (V1 / rede interna): quando SERVE_FRONTEND=true, o
 // próprio backend serve o build do frontend, deixando tudo na MESMA origem
