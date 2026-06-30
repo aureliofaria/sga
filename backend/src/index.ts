@@ -23,6 +23,13 @@ import { processEscalations } from './services/workflow';
 const app = express();
 const PORT = config.port;
 
+// Atrás de proxy/load balancer (Railway/Render/Fly/nginx) as requisições chegam
+// com X-Forwarded-For. Sem 'trust proxy', o express-rate-limit lança
+// ValidationError (ERR_ERL_UNEXPECTED_X_FORWARDED_FOR) → 500 em /api/auth.
+// Confiamos no nº de hops definido (1 = um proxy à frente; NÃO usar `true`, que
+// o próprio rate-limit considera permissivo demais). Override via TRUST_PROXY_HOPS.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS) || 1);
+
 app.use(helmet());
 app.use(cors({ origin: config.corsOrigins, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
