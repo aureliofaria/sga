@@ -49,15 +49,31 @@ export const config = {
     pass: process.env.SMTP_PASS || '',
     from: process.env.SMTP_FROM || process.env.SMTP_USER || 'APROVA <no-reply@golplus.com.br>',
   },
+  // E-mail via Microsoft Graph (alternativa ao SMTP; padrão M365). App Registration
+  // com permissão de aplicação Mail.Send + consent de admin. Preferido quando
+  // configurado — não depende de SMTP AUTH habilitado no tenant.
+  graph: {
+    tenantId: process.env.GRAPH_TENANT_ID || '',
+    clientId: process.env.GRAPH_CLIENT_ID || '',
+    clientSecret: process.env.GRAPH_CLIENT_SECRET || '',
+    // Caixa remetente (UPN/e-mail). Default: o SMTP_FROM/SMTP_USER se houver.
+    sender: process.env.GRAPH_SENDER || process.env.SMTP_USER || '',
+  },
   // URL pública do app (para montar links nas notificações).
   appUrl: process.env.APP_URL || '',
   // Teams (canal TEAMS) — Incoming Webhook do canal corporativo.
   teamsWebhookUrl: process.env.TEAMS_WEBHOOK_URL || '',
 };
 
-// Envio externo só ocorre quando os externos estão ligados E o transporte existe.
+// Transportes de e-mail configurados.
+const smtpConfigured = (): boolean => !!config.smtp.host && !!config.smtp.user;
+export const graphConfigured = (): boolean =>
+  !!config.graph.tenantId && !!config.graph.clientId && !!config.graph.clientSecret && !!config.graph.sender;
+
+// Envio externo só ocorre quando os externos estão ligados E há transporte
+// (Graph OU SMTP para e-mail; webhook para Teams).
 export const emailEnabled = (): boolean =>
-  config.externalNotificationsEnabled && !!config.smtp.host && !!config.smtp.user;
+  config.externalNotificationsEnabled && (graphConfigured() || smtpConfigured());
 export const teamsEnabled = (): boolean =>
   config.externalNotificationsEnabled && !!config.teamsWebhookUrl;
 

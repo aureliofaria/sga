@@ -48,6 +48,20 @@ produção** (processo único: backend Express serve o frontend + SQLite), poré
    > correção solicitada, etc. Sem essas variáveis, vale só o aviso in-app.
    > **Teams (opcional):** `TEAMS_WEBHOOK_URL = <Incoming Webhook do canal>`.
 
+   **Alternativa recomendada para Microsoft 365 — Graph (não exige SMTP AUTH):**
+   crie um *App Registration* no Entra/Azure com permissão de **aplicação**
+   `Mail.Send` (com **consent de admin**) e configure:
+   ```
+   NOTIFICATIONS_EXTERNAL_ENABLED = true
+   GRAPH_TENANT_ID     = <Directory (tenant) ID>
+   GRAPH_CLIENT_ID     = <Application (client) ID>
+   GRAPH_CLIENT_SECRET = <client secret gerado no App Registration>
+   GRAPH_SENDER        = <caixa remetente, ex.: naoresponda@golplus.com.br>
+   APP_URL             = https://<seu-domínio-railway>
+   ```
+   > Quando o Graph está configurado, ele é usado no lugar do SMTP. Não precisa
+   > das variáveis `SMTP_*` neste caso.
+
 4. **Deploy**. Acompanhe os logs: devem mostrar "Aplicando migrations", "semeando
    dados de DEMONSTRAÇÃO" e "Iniciando servidor".
 

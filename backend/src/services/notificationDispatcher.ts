@@ -9,7 +9,35 @@
 // `error` (re-tenta no próximo ciclo). E-mail ausente → FAILED (erro permanente).
 import nodemailer from 'nodemailer';
 import prisma from '../lib/prisma';
-import { config, emailEnabled, teamsEnabled } from '../config';
+import { config, emailEnabled, teamsEnabled, graphConfigured } from '../config';
+
+// --- Microsoft Graph (client credentials) — envio de e-mail padrão M365 -------
+let _graphToken: { value: string; exp: number } = { value: '', exp: 0 };
+async function graphToken(): Promise<string> {
+  if (_graphToken.value && Date.now() < _graphToken.exp - 60000) return _graphToken.value;
+  const url = `https://login.microsoftonline.com/${config.graph.tenantId}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: config.graph.clientId,
+    client_secret: config.graph.clientSecret,
+    scope: 'https://graph.microsoft.com/.default',
+    grant_type: 'client_credentials',
+  });
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+  if (!r.ok) throw new Error(`Graph token HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const j = (await r.json()) as { access_token: string; expires_in?: number };
+  _graphToken = { value: j.access_token, exp: Date.now() + (j.expires_in ?? 3600) * 1000 };
+  return _graphToken.value;
+}
+async function sendViaGraph(to: string, subject: string, html: string): Promise<void> {
+  const token = await graphToken();
+  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(config.graph.sender)}/sendMail`;
+  const payload = {
+    message: { subject, body: { contentType: 'HTML', content: html }, toRecipients: [{ emailAddress: { address: to } }] },
+    saveToSentItems: false,
+  };
+  const r = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  if (!r.ok) throw new Error(`Graph sendMail HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+}
 
 let _transporter: nodemailer.Transporter | null = null;
 function transporter(): nodemailer.Transporter {
@@ -53,6 +81,11 @@ export interface DispatchDeps {
 }
 
 async function defaultSendEmail(to: string, subject: string, text: string, html: string): Promise<void> {
+  // Graph é preferido quando configurado (padrão M365, sem SMTP AUTH); senão SMTP.
+  if (graphConfigured()) {
+    await sendViaGraph(to, subject, html);
+    return;
+  }
   await transporter().sendMail({ from: config.smtp.from, to, subject, text, html });
 }
 async function defaultSendTeams(text: string): Promise<void> {
