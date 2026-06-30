@@ -230,6 +230,36 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
     });
     const initiatorSectorId = initiatorMembership?.sectorId ?? null;
 
+    // Valida a seleção de TIPOS DE ATIVO contra as regras do catálogo:
+    //  - exclusão mútua: no máximo 1 item por selectionGroup;
+    //  - dependência: um item só pode ser escolhido se o seu item-pai (dependsOnId)
+    //    também estiver na seleção.
+    if (Array.isArray(resourceIds) && resourceIds.length > 0) {
+      const selected = await prisma.resourceItem.findMany({
+        where: { id: { in: resourceIds as string[] } },
+        select: { id: true, name: true, selectionGroup: true, dependsOnId: true },
+      });
+      const selectedIds = new Set(selected.map((r) => r.id));
+      const groups = new Map<string, string[]>();
+      for (const r of selected) {
+        if (r.selectionGroup) {
+          const arr = groups.get(r.selectionGroup) ?? [];
+          arr.push(r.name);
+          groups.set(r.selectionGroup, arr);
+        }
+        if (r.dependsOnId && !selectedIds.has(r.dependsOnId)) {
+          res.status(400).json({ error: `O item "${r.name}" só pode ser solicitado junto com o item do qual depende.` });
+          return;
+        }
+      }
+      for (const [grp, names] of groups) {
+        if (names.length > 1) {
+          res.status(400).json({ error: `Itens conflitantes (escolha apenas um): ${names.join(', ')}.` });
+          return;
+        }
+      }
+    }
+
     // Criação atômica: a solicitação, os recursos, a auditoria, o protocolo do
     // subfluxo no pai e as tarefas iniciais vivem na MESMA transação — evita
     // "solicitação fantasma" (criada mas sem tarefas/protocolo) se algo falhar

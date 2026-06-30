@@ -33,10 +33,17 @@ router.get('/active', authenticate, async (_req: AuthRequest, res: Response) => 
 
 router.post('/', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { name, type, sectorId, sortOrder } = req.body;
+    const { name, type, sectorId, sortOrder, selectionGroup, dependsOnId } = req.body;
     if (!name?.trim()) { res.status(400).json({ error: 'Nome é obrigatório' }); return; }
     const item = await prisma.resourceItem.create({
-      data: { name: name.trim(), type: type || 'EQUIPMENT', sectorId: sectorId || null, sortOrder: sortOrder ?? 0 },
+      data: {
+        name: name.trim(),
+        type: type || 'EQUIPMENT',
+        sectorId: sectorId || null,
+        sortOrder: sortOrder ?? 0,
+        selectionGroup: selectionGroup?.trim() || null,
+        dependsOnId: dependsOnId || null,
+      },
       include: { sector: { select: { id: true, name: true } } },
     });
     res.status(201).json(item);
@@ -47,10 +54,16 @@ router.post('/', authenticate, requireRole('ADMIN'), async (req: AuthRequest, re
 
 router.put('/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { name, type, sectorId, isActive, sortOrder } = req.body;
+    const { name, type, sectorId, isActive, sortOrder, selectionGroup, dependsOnId } = req.body;
+    // Evita autodependência (um item não pode depender de si mesmo).
+    const safeDependsOn = dependsOnId && dependsOnId !== req.params.id ? dependsOnId : (dependsOnId === null || dependsOnId === '' ? null : undefined);
     const item = await prisma.resourceItem.update({
       where: { id: req.params.id },
-      data: { name, type, sectorId: sectorId || null, isActive, sortOrder },
+      data: {
+        name, type, sectorId: sectorId || null, isActive, sortOrder,
+        ...(selectionGroup !== undefined ? { selectionGroup: selectionGroup?.trim() || null } : {}),
+        ...(safeDependsOn !== undefined ? { dependsOnId: safeDependsOn } : {}),
+      },
       include: { sector: { select: { id: true, name: true } } },
     });
     res.json(item);

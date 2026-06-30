@@ -90,19 +90,33 @@ async function main() {
     }
   }
 
-  // Catálogo de inventário (recursos alocáveis em admissões / devolvidos em desligamentos)
-  const notebook = await prisma.resourceItem.create({ data: { name: 'Notebook Dell Latitude', type: 'EQUIPMENT', sortOrder: 1 } });
-  const monitor = await prisma.resourceItem.create({ data: { name: 'Monitor 24"', type: 'EQUIPMENT', sortOrder: 2 } });
-  const cracha = await prisma.resourceItem.create({ data: { name: 'Crachá de Acesso', type: 'OTHER', sortOrder: 3 } });
+  // Catálogo de TIPOS DE ATIVO solicitáveis na requisição de vaga (configurável
+  // pelo ADMIN). Cada tipo tem um setor responsável (quem recebe a tarefa),
+  // podendo ter grupo de exclusão e dependência:
+  //  - Computador x Notebook: grupo 'ESTACAO' (escolher apenas um).
+  //  - Suporte para notebook: depende de Notebook (só aparece se Notebook for escolhido).
+  const tiSector = await prisma.sector.findFirst({ where: { name: 'TI, Dados e Infra' } });
+  const admSector = await prisma.sector.findFirst({ where: { name: 'Administrativo' } });
+  const tiId = tiSector?.id ?? null;
+  const admId = admSector?.id ?? null;
+
+  await prisma.resourceItem.create({ data: { name: 'Computador', type: 'EQUIPMENT', sectorId: tiId, sortOrder: 1, selectionGroup: 'ESTACAO' } });
+  const notebook = await prisma.resourceItem.create({ data: { name: 'Notebook', type: 'EQUIPMENT', sectorId: tiId, sortOrder: 2, selectionGroup: 'ESTACAO' } });
+  const monitor = await prisma.resourceItem.create({ data: { name: 'Monitor adicional', type: 'EQUIPMENT', sectorId: tiId, sortOrder: 3 } });
+  const headset = await prisma.resourceItem.create({ data: { name: 'Headset', type: 'EQUIPMENT', sectorId: tiId, sortOrder: 4 } });
+  await prisma.resourceItem.create({ data: { name: 'Mouse', type: 'EQUIPMENT', sectorId: tiId, sortOrder: 5 } });
+  await prisma.resourceItem.create({ data: { name: 'Teclado', type: 'EQUIPMENT', sectorId: tiId, sortOrder: 6 } });
+  await prisma.resourceItem.create({ data: { name: 'Suporte para notebook', type: 'EQUIPMENT', sectorId: admId, sortOrder: 7, dependsOnId: notebook.id } });
+  // Acessos a sistemas (também solicitáveis; setor responsável = TI/Sistemas).
   await prisma.resourceItem.createMany({
     data: [
-      { name: 'Acesso ao ERP', type: 'SYSTEM_ACCESS', sortOrder: 4 },
-      { name: 'Conta de E-mail Corporativo', type: 'SYSTEM_ACCESS', sortOrder: 5 },
-      { name: 'Licença Office 365', type: 'SYSTEM_ACCESS', sortOrder: 6 },
+      { name: 'Acesso ao ERP', type: 'SYSTEM_ACCESS', sectorId: tiId, sortOrder: 8 },
+      { name: 'Conta de E-mail Corporativo', type: 'SYSTEM_ACCESS', sectorId: tiId, sortOrder: 9 },
+      { name: 'Licença Office 365', type: 'SYSTEM_ACCESS', sectorId: tiId, sortOrder: 10 },
     ],
   });
 
-  console.log('Catálogo de inventário criado');
+  console.log('Catálogo de tipos de ativo criado (7 equipamentos + acessos)');
 
   // Flow 1: Admissão de Colaborador
   const admissaoFlow = await prisma.flowTemplate.create({
@@ -292,7 +306,7 @@ async function main() {
     data: [
       { requestId: onboardingRequest.id, resourceItemId: notebook.id, status: 'ALLOCATED' },
       { requestId: onboardingRequest.id, resourceItemId: monitor.id, status: 'ALLOCATED' },
-      { requestId: onboardingRequest.id, resourceItemId: cracha.id, status: 'ALLOCATED' },
+      { requestId: onboardingRequest.id, resourceItemId: headset.id, status: 'ALLOCATED' },
     ],
   });
 

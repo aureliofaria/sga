@@ -417,6 +417,13 @@ model AuditLog {
   createdAt DateTime @default(now())
 }
 
+// Catálogo de TIPOS DE ATIVO solicitáveis (NÃO é o inventário físico). É o que o
+// solicitante de vaga escolhe (Computador, Notebook, Monitor, Headset...). O ADMIN
+// configura a lista, o setor responsável (quem recebe a tarefa) e as regras:
+//  - selectionGroup: itens do mesmo grupo são MUTUAMENTE EXCLUSIVOS (ex.:
+//    Computador x Notebook → o solicitante escolhe só um).
+//  - dependsOnId: o item só fica disponível quando o item-pai está selecionado
+//    (ex.: "Suporte para notebook" depende de "Notebook").
 model ResourceItem {
   id        String   @id @default(cuid())
   name      String
@@ -425,6 +432,13 @@ model ResourceItem {
   sector    Sector?  @relation("SectorResources", fields: [sectorId], references: [id])
   isActive  Boolean  @default(true)
   sortOrder Int      @default(0)
+  // Grupo de exclusão mútua: ao escolher um item do grupo, os demais do mesmo
+  // grupo ficam indisponíveis (comportamento de "radio").
+  selectionGroup String?
+  // Dependência: este item só pode ser escolhido se o item-pai estiver escolhido.
+  dependsOnId    String?
+  dependsOn      ResourceItem?  @relation("ResourceDependency", fields: [dependsOnId], references: [id])
+  dependents     ResourceItem[] @relation("ResourceDependency")
   createdAt DateTime @default(now())
 
   requestResources RequestResource[]

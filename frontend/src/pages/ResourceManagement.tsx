@@ -23,6 +23,8 @@ export default function ResourceManagement() {
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState('EQUIPMENT');
   const [newSectorId, setNewSectorId] = useState('');
+  const [newGroup, setNewGroup] = useState('');
+  const [newDependsOnId, setNewDependsOnId] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
 
@@ -30,15 +32,17 @@ export default function ResourceManagement() {
   const { data: sectors = [] } = useQuery({ queryKey: ['sectors'], queryFn: sectorsApi.getAll });
 
   const createMutation = useMutation({
-    mutationFn: () => resourcesApi.create({ name: newName.trim(), type: newType, sectorId: newSectorId || undefined }),
+    mutationFn: () => resourcesApi.create({ name: newName.trim(), type: newType, sectorId: newSectorId || undefined, selectionGroup: newGroup.trim() || undefined, dependsOnId: newDependsOnId || undefined }),
     onSuccess: () => {
-      toast.success('Recurso criado!');
+      toast.success('Tipo de ativo criado!');
       qc.invalidateQueries({ queryKey: ['resources'] });
       setNewName('');
       setNewType('EQUIPMENT');
       setNewSectorId('');
+      setNewGroup('');
+      setNewDependsOnId('');
     },
-    onError: () => toast.error('Erro ao criar recurso'),
+    onError: () => toast.error('Erro ao criar tipo de ativo'),
   });
 
   const updateMutation = useMutation({
@@ -88,7 +92,7 @@ export default function ResourceManagement() {
 
   return (
     <div>
-      <Header title="Catálogo de Recursos" subtitle="Gerencie recursos e sistemas por setor" />
+      <Header title="Tipos de Ativo Solicitáveis" subtitle="Itens que aparecem na requisição de vaga — defina o setor responsável, grupos de exclusão e dependências" />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -110,15 +114,15 @@ export default function ResourceManagement() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
-        <h2 className="text-sm font-semibold text-gray-700 mb-3">Adicionar Recurso</h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-          <div className="md:col-span-1">
+        <h2 className="text-sm font-semibold text-gray-700 mb-3">Adicionar Tipo de Ativo</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+          <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Nome *</label>
             <input
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="Ex: Notebook Dell"
+              placeholder="Ex: Notebook"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
             />
           </div>
@@ -131,13 +135,34 @@ export default function ResourceManagement() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Setor</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Setor responsável (recebe a tarefa)</label>
             <select value={newSectorId} onChange={(e) => setNewSectorId(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500">
               <option value="">Geral (sem setor)</option>
               {sectors.filter((s) => s.isActive).map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Grupo de exclusão</label>
+            <input
+              type="text"
+              value={newGroup}
+              onChange={(e) => setNewGroup(e.target.value)}
+              placeholder="Ex: ESTACAO (Computador x Notebook)"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
+            />
+            <p className="text-[10px] text-gray-400 mt-1">Itens com o mesmo grupo: o solicitante escolhe só um.</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Depende de</label>
+            <select value={newDependsOnId} onChange={(e) => setNewDependsOnId(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500">
+              <option value="">— (item independente) —</option>
+              {resources.filter((r) => r.isActive).map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-gray-400 mt-1">Só aparece na vaga se o item-pai for escolhido.</p>
           </div>
           <div>
             <button
@@ -186,6 +211,16 @@ export default function ResourceManagement() {
                   {r.sector && (
                     <span className="px-2 py-0.5 bg-golplus-blue-50 text-golplus-blue-700 rounded-full text-xs">
                       {r.sector.name}
+                    </span>
+                  )}
+                  {r.selectionGroup && (
+                    <span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs" title="Grupo de exclusão (escolher só um)">
+                      grupo: {r.selectionGroup}
+                    </span>
+                  )}
+                  {r.dependsOnId && (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs" title="Só aparece se o item-pai for escolhido">
+                      depende de {resources.find((x) => x.id === r.dependsOnId)?.name ?? '—'}
                     </span>
                   )}
                   <button

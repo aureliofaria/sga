@@ -63,6 +63,10 @@ export interface ResourceItem {
   sector?: { id: string; name: string };
   isActive: boolean;
   sortOrder: number;
+  // Grupo de exclusão mútua (itens do mesmo grupo: escolher só um).
+  selectionGroup?: string | null;
+  // Dependência: este item só fica disponível se o item-pai estiver selecionado.
+  dependsOnId?: string | null;
   createdAt: string;
   requestResources?: RequestResource[];
 }

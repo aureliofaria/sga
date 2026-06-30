@@ -204,7 +204,7 @@ export const tasksApi = {
 export const resourcesApi = {
   getAll: () => api.get<ResourceItem[]>('/resources').then(r => r.data),
   getActive: () => api.get<ResourceItem[]>('/resources/active').then(r => r.data),
-  create: (data: { name: string; type: string; sectorId?: string; sortOrder?: number }) =>
+  create: (data: { name: string; type: string; sectorId?: string; sortOrder?: number; selectionGroup?: string | null; dependsOnId?: string | null }) =>
     api.post<ResourceItem>('/resources', data).then(r => r.data),
   update: (id: string, data: Partial<ResourceItem>) =>
     api.put<ResourceItem>(`/resources/${id}`, data).then(r => r.data),

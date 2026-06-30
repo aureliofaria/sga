@@ -72,16 +72,37 @@ export default function NewRequest() {
   const step0 = fullFlow?.steps?.find((s) => s.order === 0);
   const dynamicFields = (step0?.formFields ?? []).slice().sort((a, b) => a.order - b.order);
   const hasDynamicFields = dynamicFields.length > 0;
+  // Os campos legados "Precisa de…" (needs_*) deixam de aparecer na vaga: a seleção
+  // passa a ser feita pelos TIPOS DE ATIVO. Seus valores são derivados da seleção
+  // no envio (mapa abaixo) para manter os checklists das etapas de TI/Admin.
+  const visibleDynamicFields = dynamicFields.filter((f) => !f.key?.startsWith('needs_'));
+  const NEEDS_FROM_ASSET: Record<string, string> = { Notebook: 'needs_notebook', Computador: 'needs_desktop', 'Acesso ao ERP': 'needs_erp' };
 
-  const resourcesBySector = activeResources.reduce<Record<string, typeof activeResources>>((acc, r) => {
-    const key = r.sector?.name || 'Geral';
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(r);
-    return acc;
-  }, {});
+  // Tipos de ativo ordenados; os dependentes (ex.: "Suporte para notebook") só
+  // aparecem quando o item-pai (ex.: "Notebook") está selecionado.
+  const assetTypes = activeResources.slice().sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  const visibleAssetTypes = assetTypes.filter((r) => !r.dependsOnId || selectedResourceIds.includes(r.dependsOnId));
 
-  const toggleResource = (id: string) => {
-    setSelectedResourceIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  // Seleção com regras de catálogo: grupo de exclusão (escolher só um) e
+  // dependência (ao desmarcar o pai, remove os dependentes).
+  const toggleResource = (item: typeof activeResources[number]) => {
+    setSelectedResourceIds((prev) => {
+      const dependentsOf = (id: string) => activeResources.filter((r) => r.dependsOnId === id).map((r) => r.id);
+      if (prev.includes(item.id)) {
+        const drop = new Set([item.id, ...dependentsOf(item.id)]);
+        return prev.filter((x) => !drop.has(x));
+      }
+      let next = [...prev];
+      if (item.selectionGroup) {
+        // Remove os outros itens do mesmo grupo de exclusão (e seus dependentes).
+        const mates = activeResources.filter((r) => r.selectionGroup === item.selectionGroup && r.id !== item.id).map((r) => r.id);
+        const mateDeps = activeResources.filter((r) => r.dependsOnId && mates.includes(r.dependsOnId)).map((r) => r.id);
+        const drop = new Set([...mates, ...mateDeps]);
+        next = next.filter((x) => !drop.has(x));
+      }
+      next.push(item.id);
+      return next;
+    });
   };
 
   const createMutation = useMutation({
@@ -113,8 +134,17 @@ export default function NewRequest() {
       const req = await requestsApi.create(data);
       // Grava os valores dos campos dinâmicos da etapa de abertura (order 0).
       if (hasDynamicFields) {
+        // Deriva os campos needs_* a partir dos TIPOS DE ATIVO selecionados, para
+        // que os checklists das etapas de TI/Administrativo continuem aplicáveis.
+        const selectedNames = activeResources.filter((r) => selectedResourceIds.includes(r.id)).map((r) => r.name);
+        const derivedKeys = new Set(selectedNames.map((n) => NEEDS_FROM_ASSET[n]).filter(Boolean));
         const values = dynamicFields
-          .map((f) => ({ fieldId: f.id, value: (dynamicValues[f.id] ?? '').trim() }))
+          .map((f) => {
+            if (f.key?.startsWith('needs_')) {
+              return { fieldId: f.id, value: derivedKeys.has(f.key) ? 'sim' : 'nao' };
+            }
+            return { fieldId: f.id, value: (dynamicValues[f.id] ?? '').trim() };
+          })
           .filter((v) => v.value !== '');
         if (values.length > 0) {
           await requestsApi.saveFields(req.id, 0, values);
@@ -153,8 +183,8 @@ export default function NewRequest() {
         if (!form.justification.trim()) return false;
         if (categoryDef?.requiresSupplier && !form.supplier.trim()) return false;
       }
-      // Bloqueia avanço se algum campo dinâmico obrigatório estiver vazio.
-      for (const f of dynamicFields) {
+      // Bloqueia avanço se algum campo dinâmico obrigatório (visível) estiver vazio.
+      for (const f of visibleDynamicFields) {
         if (f.required && !(dynamicValues[f.id] ?? '').trim()) return false;
       }
       return true;
@@ -299,7 +329,7 @@ export default function NewRequest() {
                     <div className="border-t border-gray-100 pt-4">
                       <h3 className="text-sm font-semibold text-gray-700 mb-3">Dados da Abertura de Vaga</h3>
                       <div className="space-y-4">
-                        {dynamicFields.map((f) => (
+                        {visibleDynamicFields.map((f) => (
                           <DynamicField
                             key={f.id}
                             field={f}
@@ -310,29 +340,30 @@ export default function NewRequest() {
                       </div>
                     </div>
                   )}
-                  {vacancyType && activeResources.length > 0 && (
+                  {vacancyType && assetTypes.length > 0 && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Recursos e Sistemas Necessários</label>
-                      <div className="space-y-3">
-                        {Object.entries(resourcesBySector).map(([sectorName, resources]) => (
-                          <div key={sectorName} className="border border-gray-200 rounded-lg p-3">
-                            <div className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">{sectorName}</div>
-                            <div className="space-y-1.5">
-                              {resources.map((r) => (
-                                <label key={r.id} className="flex items-center gap-2 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedResourceIds.includes(r.id)}
-                                    onChange={() => toggleResource(r.id)}
-                                    className="rounded border-gray-300 text-golplus-blue-600"
-                                  />
-                                  <span className="text-sm text-gray-700">{r.name}</span>
-                                  <span className="text-xs text-gray-400">{r.type === 'EQUIPMENT' ? 'Equipamento' : r.type === 'SYSTEM_ACCESS' ? 'Acesso a sistema' : 'Outro'}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Equipamentos solicitados</label>
+                      <p className="text-xs text-gray-500 mb-2">Selecione os itens que a vaga precisa. Cada item é encaminhado ao setor responsável.</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {visibleAssetTypes.map((r) => {
+                          const selected = selectedResourceIds.includes(r.id);
+                          const isGrouped = !!r.selectionGroup;
+                          const isDependent = !!r.dependsOnId;
+                          return (
+                            <button
+                              type="button"
+                              key={r.id}
+                              onClick={() => toggleResource(r)}
+                              className={`flex items-center gap-2 p-3 border-2 rounded-lg text-left transition-all ${selected ? 'border-golplus-blue-500 bg-golplus-blue-50' : 'border-gray-200 hover:border-gray-300 bg-white'} ${isDependent ? 'sm:col-span-2 ml-4' : ''}`}
+                            >
+                              <span className={`flex-shrink-0 w-4 h-4 border-2 flex items-center justify-center ${isGrouped ? 'rounded-full' : 'rounded'} ${selected ? 'border-golplus-blue-600 bg-golplus-blue-600' : 'border-gray-300'}`}>
+                                {selected && <span className="text-white text-[10px] leading-none">✓</span>}
+                              </span>
+                              <span className="text-sm text-gray-800">{r.name}</span>
+                              {isDependent && <span className="text-[10px] text-gray-400">(acessório)</span>}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
