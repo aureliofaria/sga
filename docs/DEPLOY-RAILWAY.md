@@ -22,17 +22,16 @@ produção** (processo único: backend Express serve o frontend + SQLite), poré
    `aureliofaria/APROVA`, branch **`main`**. O Railway detecta o `Dockerfile`.
 
 2. **Adicione um Volume** ao serviço (aba *Volumes* / *Data*): mount path **`/data`**.
+   > O `Dockerfile` já usa `/data` por padrão (`DATABASE_URL=file:/data/aprova.db`,
+   > `UPLOAD_DIR=/data/uploads`) — então **basta montar o volume em `/data`**.
 
-3. **Variáveis** (aba *Variables*):
+3. **Variáveis** (aba *Variables*) — só uma é obrigatória:
    ```
-   JWT_SECRET   = <gere: openssl rand -hex 32>
-   DATABASE_URL = file:/data/aprova.db
-   UPLOAD_DIR   = /data/uploads
-   SERVE_FRONTEND = true
+   JWT_SECRET = <gere: openssl rand -hex 32>
    ```
-   > Não defina `NODE_ENV=production` neste ambiente de teste — é o que permite o
-   > seed de demonstração. (O `JWT_SECRET` acima já garante tokens seguros.)
-   > Não defina `PORT`: o Railway injeta a porta automaticamente.
+   > Opcionais (já têm default `/data` na imagem): `DATABASE_URL`, `UPLOAD_DIR`.
+   > **Não** defina `NODE_ENV=production` neste ambiente de teste — é o que permite
+   > o seed de demonstração. **Não** defina `PORT`: o Railway injeta a porta.
 
 4. **Deploy**. Acompanhe os logs: devem mostrar "Aplicando migrations", "semeando
    dados de DEMONSTRAÇÃO" e "Iniciando servidor".

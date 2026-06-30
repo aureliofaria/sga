@@ -19,13 +19,21 @@ RUN npm ci
 # Código-fonte
 COPY . .
 
+# Defaults de runtime — apontam o SQLite e os anexos para o VOLUME persistente
+# (monte um volume em /data no host). O DATABASE_URL é ABSOLUTO de propósito: o
+# Prisma o usa tanto no migrate/seed quanto no client em runtime, evitando o bug
+# de caminho relativo resolvido de formas diferentes conforme o cwd. As variáveis
+# do serviço no Railway podem sobrepor estes valores.
+ENV DATABASE_URL=file:/data/aprova.db
+ENV UPLOAD_DIR=/data/uploads
+ENV SERVE_FRONTEND=true
+
 # Prisma Client + builds (frontend/dist e backend/dist).
 RUN npm run db:generate -w backend \
  && npm run build -w frontend \
  && npm run build -w backend
 
-# O backend serve o frontend na mesma origem. PORT é injetado pelo host (Railway).
-ENV SERVE_FRONTEND=true
+# PORT é injetado pelo host (Railway).
 EXPOSE 3001
 
 RUN chmod +x /app/railway-entrypoint.sh

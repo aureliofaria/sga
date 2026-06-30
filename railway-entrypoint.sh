@@ -6,6 +6,11 @@ set -e
 
 cd /app/backend
 
+# Garante que os diretórios do volume existam (banco + anexos) antes do migrate.
+DB_PATH="${DATABASE_URL#file:}"
+mkdir -p "$(dirname "$DB_PATH")" "${UPLOAD_DIR:-/data/uploads}" 2>/dev/null || true
+
+echo "[aprova] Banco: ${DATABASE_URL}  | Uploads: ${UPLOAD_DIR:-/data/uploads}"
 echo "[aprova] Aplicando migrations (prisma migrate deploy)..."
 npx prisma migrate deploy
 

@@ -4,7 +4,11 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  // Caminho do banco vem do ambiente (DATABASE_URL). Use um caminho ABSOLUTO em
+  // deploys com volume (ex.: file:/data/aprova.db) para que CLI (migrate/seed) e
+  // client em runtime abram exatamente o MESMO arquivo, independente do cwd.
+  // Em dev, o backend/.env define file:./dev.db.
+  url      = env("DATABASE_URL")
 }
 
 model User {
