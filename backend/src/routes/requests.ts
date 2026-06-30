@@ -553,6 +553,38 @@ async function handleDecision(
         await tx.auditLog.create({
           data: { requestId, userId: reqUser.id, userName: reqUser.name, action: 'APPROVED', details: reason ? `Aprovado com comentário: ${reason}` : 'Aprovado' },
         });
+        // Deferir É executar a própria tarefa de aprovação: conclui a tarefa do
+        // aprovador nesta etapa (se existir). Sem isto, a etapa nunca completa —
+        // isStepComplete exige todas as tarefas ativas COMPLETED.
+        await tx.requestTask.updateMany({
+          where: { requestId, step: { order: step }, assigneeId: reqUser.id, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+          data: { status: 'COMPLETED', completedAt: new Date() },
+        });
+        // Modelo de FILA de aprovação: as etapas de alçada difundem uma tarefa a
+        // cada aprovador elegível (requiredRole ∪ faixas). Quando o nº de
+        // aprovações da rodada já satisfaz a faixa de valor, as tarefas das demais
+        // filas são canceladas — basta um aprovador da faixa decidir.
+        const stepDef = request.flow.steps.find((s) => s.order === step);
+        if (stepDef && stepDef.authLevels.length > 0) {
+          const amount = request.amountCents ?? 0;
+          let required = 1;
+          for (const lvl of stepDef.authLevels) {
+            const min = lvl.minValueCents ?? 0;
+            const max = lvl.maxValueCents ?? Number.POSITIVE_INFINITY;
+            if (amount >= min && amount <= max) { required = lvl.requiredApprovers; break; }
+          }
+          const approvedRows = await tx.approval.findMany({
+            where: { requestId, stepOrder: step, round, decision: 'APPROVED' },
+            select: { approverId: true },
+          });
+          const approvedCount = new Set(approvedRows.map((a) => a.approverId)).size;
+          if (approvedCount >= required) {
+            await tx.requestTask.updateMany({
+              where: { requestId, step: { order: step }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+              data: { status: 'CANCELLED' },
+            });
+          }
+        }
       } else if (action === 'REJECT') {
         await tx.approval.create({
           data: { requestId, approverId: reqUser.id, stepOrder: step, decision: 'REJECTED', comments: reason, round },

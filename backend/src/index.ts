@@ -23,6 +23,13 @@ import { processEscalations } from './services/workflow';
 const app = express();
 const PORT = config.port;
 
+// Atrás de proxy/load balancer (Railway/Render/Fly/nginx) as requisições chegam
+// com X-Forwarded-For. Sem 'trust proxy', o express-rate-limit lança
+// ValidationError (ERR_ERL_UNEXPECTED_X_FORWARDED_FOR) → 500 em /api/auth.
+// Confiamos no nº de hops definido (1 = um proxy à frente; NÃO usar `true`, que
+// o próprio rate-limit considera permissivo demais). Override via TRUST_PROXY_HOPS.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS) || 1);
+
 app.use(helmet());
 app.use(cors({ origin: config.corsOrigins, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
@@ -42,7 +49,9 @@ app.use(
 // Limitador de tentativas em endpoints sensíveis de autenticação (brute force).
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  // Padrão conservador (20/15min) contra brute force; ajustável via env para
+  // ambientes de homologação/carga onde scripts de teste fazem muitos logins.
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX) || 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Muitas tentativas. Tente novamente mais tarde.' },

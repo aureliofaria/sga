@@ -111,6 +111,37 @@ describe('POST /:id/decision — DEFER', () => {
     expect((await prisma.request.findUniqueOrThrow({ where: { id: req.id } })).currentStep).toBe(1);
   });
 
+  it('etapa de alçada com vários aprovadores elegíveis: 1 DEFER conclui (cancela as irmãs)', async () => {
+    // Regressão: createRequestTasks difunde UMA tarefa por aprovador elegível.
+    // Sem concluir a própria tarefa + cancelar as irmãs ao satisfazer a faixa, a
+    // etapa nunca completava (isStepComplete exige todas as tarefas ativas
+    // COMPLETED) — o pagamento/compra travava na aprovação do gestor.
+    const initiator = await makeUser('USER');
+    const m1 = await makeUser('MANAGER');
+    const m2 = await makeUser('MANAGER');
+    const m3 = await makeUser('MANAGER');
+    const flow = await makeFlow('PAYMENT', [
+      { order: 0, authLevels: [{ name: 'A', minValueCents: 0, maxValueCents: null, requiredApprovers: 1, approverRole: 'MANAGER' }] },
+      { order: 1 },
+    ]);
+    const req = await newRequest(flow.id, initiator.id, 450000);
+    const { createRequestTasks } = await import('../src/services/workflow');
+    await createRequestTasks(req.id, flow.id, 0); // difunde tarefas a m1, m2, m3
+
+    const before = await prisma.requestTask.findMany({ where: { requestId: req.id } });
+    expect(before.length).toBe(3);
+    expect(before.every((t) => t.status === 'PENDING')).toBe(true);
+
+    const res = await request(app).post(`/api/requests/${req.id}/decision`).set(auth(tokenFor(m1.id))).send({ action: 'DEFER' });
+    expect(res.status).toBe(200);
+    // Avançou para a etapa 1.
+    expect((await prisma.request.findUniqueOrThrow({ where: { id: req.id } })).currentStep).toBe(1);
+    // A tarefa do aprovador foi concluída; as demais filas foram canceladas.
+    const after = await prisma.requestTask.findMany({ where: { requestId: req.id, stepId: before[0].stepId } });
+    expect(after.find((t) => t.assigneeId === m1.id)?.status).toBe('COMPLETED');
+    expect(after.filter((t) => t.assigneeId !== m1.id).every((t) => t.status === 'CANCELLED')).toBe(true);
+  });
+
   it('DEFER com requiredApprovers=2: o segundo aprovador conclui a etapa', async () => {
     const initiator = await makeUser('USER');
     const f1 = await makeUser('FINANCE');
