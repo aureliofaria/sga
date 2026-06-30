@@ -331,11 +331,15 @@ model Notification {
   title     String
   body      String?
   channel   String    @default("IN_APP") // IN_APP | TEAMS | OUTLOOK
-  status    String    @default("UNREAD") // IN_APP: UNREAD -> READ; externos: PENDING -> SENT (dispatcher futuro)
+  status    String    @default("UNREAD") // IN_APP: UNREAD -> READ; externos: PENDING -> SENT | FAILED
   createdAt DateTime  @default(now())
   readAt    DateTime?
+  // Externos: instante do envio e último erro (observabilidade do dispatcher).
+  sentAt    DateTime?
+  error     String?
 
   @@index([userId, status])
+  @@index([channel, status])
 }
 
 model RequestTask {

@@ -92,6 +92,9 @@ if (require.main === module) {
   // Ligado apenas via PAYMENTS_SCHEDULER_ENABLED=true; nunca em testes.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   require('./services/scheduler').startPaymentsScheduler();
+  // Dispatcher de notificações externas (e-mail/Teams) — envia as PENDING.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  require('./services/notificationDispatcher').startNotificationsDispatcher();
 
   // Agendador in-process do escalonamento temporal (Fase 0 · Passo 11). Só roda
   // quando o módulo é executado diretamente — sob teste o `app` é importado

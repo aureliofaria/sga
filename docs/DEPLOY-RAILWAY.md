@@ -33,6 +33,21 @@ produção** (processo único: backend Express serve o frontend + SQLite), poré
    > **Não** defina `NODE_ENV=production` neste ambiente de teste — é o que permite
    > o seed de demonstração. **Não** defina `PORT`: o Railway injeta a porta.
 
+   **Notificações por e-mail (opcional — canal Outlook/Office 365):**
+   ```
+   NOTIFICATIONS_EXTERNAL_ENABLED = true
+   SMTP_HOST = smtp.office365.com
+   SMTP_PORT = 587
+   SMTP_SECURE = false
+   SMTP_USER = <conta corporativa, ex.: aprova@golplus.com.br>
+   SMTP_PASS = <senha de app da conta>
+   SMTP_FROM = APROVA <aprova@golplus.com.br>
+   APP_URL = https://<seu-domínio-railway>   # usado nos links dos e-mails
+   ```
+   > Com isso, os responsáveis recebem e-mail ao ganhar tarefa/aprovação pendente,
+   > correção solicitada, etc. Sem essas variáveis, vale só o aviso in-app.
+   > **Teams (opcional):** `TEAMS_WEBHOOK_URL = <Incoming Webhook do canal>`.
+
 4. **Deploy**. Acompanhe os logs: devem mostrar "Aplicando migrations", "semeando
    dados de DEMONSTRAÇÃO" e "Iniciando servidor".
 

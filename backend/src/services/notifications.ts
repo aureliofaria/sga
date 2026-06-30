@@ -17,6 +17,20 @@ export type NotificationEvent =
 
 const EXTERNAL_CHANNELS = ['TEAMS', 'OUTLOOK'] as const;
 
+// Eventos "acionáveis" para os quais o e-mail (OUTLOOK) é LIGADO por padrão
+// quando os externos estão habilitados — para a pessoa saber que tem algo a
+// fazer sem precsar opt-in individual. O usuário ainda pode desativar nas
+// preferências. TEAMS permanece opt-in (default false).
+const EMAIL_DEFAULT_EVENTS: ReadonlySet<NotificationEvent> = new Set([
+  'TASK_ASSIGNED',
+  'REQUEST_CORRECTION_REQUESTED',
+  'REQUEST_INFO_REQUESTED',
+  'REQUEST_REJECTED',
+  'REQUEST_FORWARDED',
+  'TASK_DELAY_REMINDER',
+  'TASK_ESCALATED_TO_LEADER',
+]);
+
 interface NotifyInput {
   userId: string;
   type: NotificationEvent;
@@ -58,7 +72,9 @@ export async function notify(tx: Tx, input: NotifyInput): Promise<void> {
   if (!config.externalNotificationsEnabled) return;
 
   for (const channel of EXTERNAL_CHANNELS) {
-    const enabled = await isChannelEnabled(tx, input.userId, channel, input.type, false);
+    // OUTLOOK liga por padrão nos eventos acionáveis; TEAMS é opt-in.
+    const channelDefault = channel === 'OUTLOOK' && EMAIL_DEFAULT_EVENTS.has(input.type);
+    const enabled = await isChannelEnabled(tx, input.userId, channel, input.type, channelDefault);
     if (!enabled) continue;
     await tx.notification.create({
       data: {
